@@ -1,0 +1,15 @@
+# Секреты и личные данные — никогда в git
+.env
+*.db
+*.db-*
+health.json
+exports/
+
+# Сборка
+/bin/
+/dist/
+
+# Редакторы и ОС
+.idea/
+.vscode/
+.DS_Store

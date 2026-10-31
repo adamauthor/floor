@@ -1,0 +1,35 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!-- Ставится через `make install-launchd`, который подставляет __HOME__. -->
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>com.floor.bot</string>
+
+    <key>ProgramArguments</key>
+    <array>
+        <string>/bin/zsh</string>
+        <string>-c</string>
+        <string>set -a; source __HOME__/.floor/.env; set +a; exec __HOME__/.floor/bin/floor</string>
+    </array>
+
+    <key>EnvironmentVariables</key>
+    <dict>
+        <!-- Чтобы бот нашёл `claude` -->
+        <key>PATH</key>
+        <string>__HOME__/.local/bin:/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin</string>
+    </dict>
+
+    <key>RunAtLoad</key>
+    <true/>
+    <key>KeepAlive</key>
+    <true/>
+    <key>ThrottleInterval</key>
+    <integer>30</integer>
+
+    <key>StandardOutPath</key>
+    <string>__HOME__/.floor/logs/floor.log</string>
+    <key>StandardErrorPath</key>
+    <string>__HOME__/.floor/logs/floor.log</string>
+</dict>
+</plist>

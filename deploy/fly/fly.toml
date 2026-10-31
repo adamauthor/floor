@@ -1,0 +1,25 @@
+# Fly.io: одна машина 24/7. Секреты — через `fly secrets set` (см. docs/SPEC.md, 11.2).
+app = "floor-REPLACE-ME"
+primary_region = "fra"
+
+[env]
+  HEALTH_SOURCE = "http"
+  HTTP_ADDR = ":8080"
+  DB_PATH = "/data/floor.db"
+  DEFAULT_TZ = "Asia/Almaty"
+
+[mounts]
+  source = "floor_data"
+  destination = "/data"
+
+[http_service]
+  internal_port = 8080
+  force_https = true
+  # Long polling Telegram живёт в процессе — машину нельзя усыплять.
+  auto_stop_machines = "off"
+  auto_start_machines = true
+  min_machines_running = 1
+
+[[vm]]
+  size = "shared-cpu-1x"
+  memory = "512mb"
