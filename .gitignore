@@ -13,3 +13,7 @@ exports/
 .idea/
 .vscode/
 .DS_Store
+
+# Личные привычки и отчёты тестов
+habits.json
+cover.out

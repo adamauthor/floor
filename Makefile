@@ -4,7 +4,7 @@ LDFLAGS   := -s -w -X main.version=$(VERSION)
 FLOOR_DIR := $(HOME)/.floor
 PLIST     := com.floor.bot.plist
 
-.PHONY: build run test lint install-launchd uninstall-launchd logs deploy-fly
+.PHONY: build run test cover lint habits debug-day install-launchd uninstall-launchd logs deploy-fly help
 
 build: ## Собрать бинарь
 	CGO_ENABLED=0 go build -ldflags "$(LDFLAGS)" -o $(BIN) ./cmd/floor
@@ -15,6 +15,15 @@ run: build ## Запустить локально с .env
 
 test: ## Тесты
 	go test -race ./...
+
+cover: ## Покрытие; metrics и render должны держать 80 %
+	go test -cover ./...
+
+habits: build ## Показать привычки и якоря, проверить habits.json
+	@set -a; [ -f .env ] && . ./.env; set +a; ./$(BIN) habits
+
+debug-day: build ## Метрики дня: make debug-day DAY=2026-10-31
+	@set -a; [ -f .env ] && . ./.env; set +a; ./$(BIN) debug-day $(DAY)
 
 lint: ## go vet + staticcheck
 	go vet ./...
