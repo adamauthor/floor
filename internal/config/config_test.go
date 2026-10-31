@@ -41,10 +41,43 @@ func TestLoadDefaults(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Load: %v", err)
 	}
-	if c.WakeAnchor != (Clock{7, 0}) || c.StepsFloor != 4000 || c.StepsGoal != 7000 {
+	if c.WakeAnchor != (Clock{7, 0}) || c.StepsFloor != 7000 || c.StepsGoal != 10000 {
 		t.Errorf("неожиданные значения по умолчанию: %+v", c)
 	}
 	if c.DefaultTZ.String() != "Asia/Almaty" {
 		t.Errorf("DefaultTZ = %s", c.DefaultTZ)
+	}
+}
+
+func TestLoadValidates(t *testing.T) {
+	tests := []struct {
+		name, key, value string
+	}{
+		{"часы", "WAKE_ANCHOR", "семь"},
+		{"число", "WAKE_TOLERANCE_MIN", "час"},
+		{"длительность", "LLM_TIMEOUT", "долго"},
+		{"пояс", "DEFAULT_TZ", "Марс/Олимп"},
+		{"источник", "HEALTH_SOURCE", "ftp"},
+		{"owner", "TELEGRAM_OWNER_ID", "abc"},
+		{"http без токена", "HEALTH_SOURCE", "http"},
+		{"пол выше цели", "STEPS_FLOOR", "20000"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Setenv("TELEGRAM_TOKEN", "x")
+			t.Setenv("TELEGRAM_OWNER_ID", "42")
+			t.Setenv(tt.key, tt.value)
+			if _, err := Load(); err == nil {
+				t.Fatalf("ожидалась ошибка для %s=%s", tt.key, tt.value)
+			}
+		})
+	}
+}
+
+func TestLoadLocalWithoutSecrets(t *testing.T) {
+	t.Setenv("TELEGRAM_TOKEN", "")
+	t.Setenv("TELEGRAM_OWNER_ID", "")
+	if _, err := LoadLocal(); err != nil {
+		t.Fatalf("LoadLocal не должен требовать секреты: %v", err)
 	}
 }

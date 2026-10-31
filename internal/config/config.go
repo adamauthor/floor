@@ -16,6 +16,7 @@ import (
 type Config struct {
 	TelegramToken   string
 	TelegramOwnerID int64
+	TelegramAPIURL  string // пусто — api.telegram.org; задаётся в тестах
 
 	WakeAnchor       Clock
 	WakeToleranceMin int
@@ -24,6 +25,8 @@ type Config struct {
 	EveningAt        Clock
 	WeeklyAt         Clock
 	DefaultTZ        *time.Location
+
+	HabitsFile string
 
 	HealthSource string // "file" | "http"
 	HealthFile   string
@@ -51,22 +54,44 @@ func ParseClock(s string) (Clock, error) {
 	return Clock{Hour: t.Hour(), Minute: t.Minute()}, nil
 }
 
-// Load читает конфигурацию из окружения и проверяет её.
+// Load читает конфигурацию из окружения и проверяет её целиком: для запуска бота.
 func Load() (Config, error) {
+	c, err := LoadLocal()
+	var errs []error
+	if err != nil {
+		errs = append(errs, err)
+	}
+	if c.TelegramToken == "" {
+		errs = append(errs, errors.New("TELEGRAM_TOKEN обязателен"))
+	}
+	if c.TelegramOwnerID == 0 {
+		errs = append(errs, errors.New("TELEGRAM_OWNER_ID обязателен"))
+	}
+	if c.HealthSource == "http" && c.IngestToken == "" {
+		errs = append(errs, errors.New("INGEST_TOKEN обязателен при HEALTH_SOURCE=http"))
+	}
+	return c, errors.Join(errs...)
+}
+
+// LoadLocal читает конфигурацию без требований к секретам: для команд вроде debug-day.
+func LoadLocal() (Config, error) {
 	var errs []error
 	r := reader{errs: &errs}
 
 	c := Config{
 		TelegramToken:   r.str("TELEGRAM_TOKEN", ""),
 		TelegramOwnerID: r.int64("TELEGRAM_OWNER_ID", 0),
+		TelegramAPIURL:  r.str("TELEGRAM_API_URL", ""),
 
 		WakeAnchor:       r.clock("WAKE_ANCHOR", "07:00"),
 		WakeToleranceMin: r.int("WAKE_TOLERANCE_MIN", 60),
-		StepsFloor:       r.int("STEPS_FLOOR", 4000),
-		StepsGoal:        r.int("STEPS_GOAL", 7000),
+		StepsFloor:       r.int("STEPS_FLOOR", 7000),
+		StepsGoal:        r.int("STEPS_GOAL", 10000),
 		EveningAt:        r.clock("EVENING_AT", "21:00"),
 		WeeklyAt:         r.clock("WEEKLY_AT", "20:00"),
 		DefaultTZ:        r.location("DEFAULT_TZ", "Asia/Almaty"),
+
+		HabitsFile: expandHome(r.str("HABITS_FILE", "~/.floor/habits.json")),
 
 		HealthSource: r.str("HEALTH_SOURCE", "file"),
 		HealthFile:   expandHome(r.str("HEALTH_FILE", "~/Library/Mobile Documents/com~apple~CloudDocs/Floor/health.json")),
@@ -80,18 +105,8 @@ func Load() (Config, error) {
 		LogLevel:          r.str("LOG_LEVEL", "info"),
 	}
 
-	if c.TelegramToken == "" {
-		errs = append(errs, errors.New("TELEGRAM_TOKEN обязателен"))
-	}
-	if c.TelegramOwnerID == 0 {
-		errs = append(errs, errors.New("TELEGRAM_OWNER_ID обязателен"))
-	}
 	switch c.HealthSource {
-	case "file":
-	case "http":
-		if c.IngestToken == "" {
-			errs = append(errs, errors.New("INGEST_TOKEN обязателен при HEALTH_SOURCE=http"))
-		}
+	case "file", "http":
 	default:
 		errs = append(errs, fmt.Errorf("HEALTH_SOURCE: ожидается file или http, получено %q", c.HealthSource))
 	}
