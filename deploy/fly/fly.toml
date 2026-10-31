@@ -6,6 +6,7 @@ primary_region = "fra"
   HEALTH_SOURCE = "http"
   HTTP_ADDR = ":8080"
   DB_PATH = "/data/floor.db"
+  HABITS_FILE = "/data/habits.json"
   DEFAULT_TZ = "Asia/Almaty"
 
 [mounts]
