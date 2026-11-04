@@ -18,7 +18,7 @@ const (
 	kvSettingsRev = "settings_button_rev"
 	kvDeltaAnchor = "wake_delta_anchor"
 
-	settingsLabel = "⚙️ Настройки"
+	settingsLabel = "Floor"
 )
 
 // conf — текущая конфигурация: настройки из Telegram меняют её на ходу.
@@ -85,8 +85,8 @@ func (a *App) menuState(ctx context.Context, f habits.File) webapp.State {
 	return st
 }
 
-// menuKey — что сейчас в кнопке меню: версия настроек и адрес туннеля.
-func menuKey(st webapp.State) string { return "menu " + st.Rev + " " + st.API }
+// menuKey — что сейчас в кнопке меню: версия настроек, адрес туннеля и подпись.
+func menuKey(st webapp.State) string { return "menu " + st.Rev + " " + st.API + " " + settingsLabel }
 
 // setMenu ставит кнопку меню с состоянием в адресе.
 func (a *App) setMenu(ctx context.Context, st webapp.State) error {
@@ -114,9 +114,9 @@ func (a *App) syncSettingsButton(ctx context.Context, local time.Time) error {
 	}
 	if !strings.HasPrefix(stored, "menu ") {
 		// Первый запуск или переезд с кнопки под полем ввода: её надо убрать.
-		text := "⚙️ Привычки, время и шаги — кнопка «Настройки» слева от поля ввода."
+		text := "Привычки, время и шаги — кнопка «Floor» слева от поля ввода."
 		if stored != "" {
-			text = "⚙️ Настройки переехали в кнопку слева от поля ввода."
+			text = "Настройки переехали в кнопку «Floor» слева от поля ввода."
 		}
 		if err := a.TG.RemoveKeyboard(ctx, text); err != nil {
 			return err
@@ -131,7 +131,7 @@ func (a *App) OnSettings(ctx context.Context) {
 	if err := a.setMenu(ctx, a.menuState(ctx, a.currentHabits(ctx, today))); err != nil {
 		a.Log.Warn("settings_send_failed", "error", err)
 	}
-	if _, err := a.TG.Send(ctx, "Настройки — кнопка «⚙️ Настройки» слева от поля ввода.", nil); err != nil {
+	if _, err := a.TG.Send(ctx, "Настройки — кнопка «Floor» слева от поля ввода.", nil); err != nil {
 		a.Log.Warn("settings_send_failed", "error", err)
 	}
 }

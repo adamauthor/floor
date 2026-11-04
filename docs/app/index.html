@@ -532,10 +532,10 @@ body.web.dirty #save { display: block; }
     }
     let st;
     try { st = await load(); } catch (e) {
-      empty('Не открылось', 'Не удалось прочитать настройки. Нажми «⚙️ Настройки» в чате ещё раз или обнови Telegram.');
+      empty('Не открылось', 'Не удалось прочитать настройки. Нажми «Floor» слева от поля ввода ещё раз или обнови Telegram.');
       return;
     }
-    if (!st) { empty('Настройки Floor', 'Открой их из бота: кнопка «⚙️ Настройки» слева от поля ввода.'); return; }
+    if (!st) { empty('Настройки Floor', 'Открой их из бота: кнопка «Floor» слева от поля ввода.'); return; }
     if (st.v !== 1) { empty('Нужна свежая версия', 'Отправь боту /settings — придёт новая кнопка.'); return; }
     state = structuredClone(st);
     state.h = state.h || [];
