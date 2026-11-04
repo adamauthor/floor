@@ -30,7 +30,9 @@ var (
 type sent struct {
 	id      int
 	text    string
-	buttons []Button
+	buttons []Button   // все кнопки подряд
+	rows    [][]Button // как в сообщении
+	chat    int64      // для SendTo
 }
 
 type fakeTG struct {
@@ -40,6 +42,7 @@ type fakeTG struct {
 	pins    []int
 	menus   []sent   // кнопки меню: в text — подпись, в buttons[0].Data — адрес
 	removes []string // сообщения, убравшие кнопки под полем ввода
+	shared  []sent   // итоги недели второму человеку
 	typing  int
 	sendErr error
 	editErr error
@@ -53,18 +56,61 @@ func (f *fakeTG) Send(_ context.Context, text string, b []Button) (int, error) {
 		return 0, f.sendErr
 	}
 	f.nextID++
-	f.msgs = append(f.msgs, sent{f.nextID, text, b})
+	f.msgs = append(f.msgs, sent{id: f.nextID, text: text, buttons: b, rows: [][]Button{b}})
 	return f.nextID, nil
 }
 
-func (f *fakeTG) Edit(_ context.Context, id int, text string) error {
+func (f *fakeTG) Edit(ctx context.Context, id int, text string) error {
+	return f.EditRows(ctx, id, text, nil)
+}
+
+func (f *fakeTG) EditRows(_ context.Context, id int, text string, rows [][]Button) error {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	if f.editErr != nil {
 		return f.editErr
 	}
-	f.edits = append(f.edits, sent{id: id, text: text})
+	f.edits = append(f.edits, sent{id: id, text: text, buttons: flat(rows), rows: rows})
 	return nil
+}
+
+func (f *fakeTG) SendRows(_ context.Context, text string, rows [][]Button) (int, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.sendErr != nil {
+		return 0, f.sendErr
+	}
+	f.nextID++
+	f.msgs = append(f.msgs, sent{id: f.nextID, text: text, buttons: flat(rows), rows: rows})
+	return f.nextID, nil
+}
+
+func (f *fakeTG) SendTo(_ context.Context, chat int64, text string) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.shared = append(f.shared, sent{text: text, chat: chat})
+	return nil
+}
+
+func (f *fakeTG) StartLink(_ context.Context, payload string) (string, error) {
+	return "https://t.me/floor_test_bot?start=" + payload, nil
+}
+
+func (f *fakeTG) lastEdit() sent {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if len(f.edits) == 0 {
+		return sent{}
+	}
+	return f.edits[len(f.edits)-1]
+}
+
+func flat(rows [][]Button) []Button {
+	var out []Button
+	for _, r := range rows {
+		out = append(out, r...)
+	}
+	return out
 }
 
 func (f *fakeTG) Pin(_ context.Context, id int) error {
@@ -355,48 +401,76 @@ func TestMorningWindowClosedAfterWake(t *testing.T) {
 
 // --- Вечер ----------------------------------------------------------------
 
-func TestEveningButtonSavesAndEdits(t *testing.T) {
+func TestEveningMarksPerHabit(t *testing.T) {
 	h := newHarness(t)
 	h.tick("2026-10-31 21:00", plus5)
 	got := h.tg.matching("🌙")
-	if len(got) != 1 || len(got[0].buttons) != 2 {
+	if len(got) != 1 || len(got[0].rows) != 5 {
 		t.Fatalf("вечер: %+v", got)
 	}
-	for _, b := range got[0].buttons {
-		if strings.Contains(b.Text, "✈") || strings.Contains(b.Data, "flight") {
-			t.Errorf("кнопки перелёта быть не должно: %+v", b)
-		}
-	}
-	if got[0].text != "🌙 Пол на сегодня: зубы · выйти на улицу · одна вещь на место" {
+	if !strings.Contains(got[0].text, "🦷 Зубы\nпол: зубы · цель: зубы до телефона") {
 		t.Errorf("текст: %q", got[0].text)
 	}
-
-	msgs := len(h.tg.msgs)
-	h.now = at("2026-10-31 21:05", plus5)
-	if ans := h.app.OnCallback(ctx, got[0].buttons[0].Data, got[0].id); ans != "" {
-		t.Errorf("ответ: %q", ans)
+	msg := got[0].id
+	tap := func(data string) {
+		t.Helper()
+		if ans := h.app.OnCallback(ctx, data, msg); ans != "" {
+			t.Errorf("%s → %q", data, ans)
+		}
 	}
-	d, _ := h.db.GetDay(ctx, "2026-10-31")
-	if d.FloorStatus != "yes" {
+	h.now = at("2026-10-31 21:05", plus5)
+	teeth := got[0].rows[1][0].Data
+	tap(teeth) // пол
+	tap(teeth) // цель
+	if b := h.tg.lastEdit().rows[1][0].Text; b != "🦷 Зубы · цель ✅" {
+		t.Errorf("кнопка после двух нажатий: %q", b)
+	}
+	tap(teeth)                  // снова без отметки
+	tap(teeth)                  // пол
+	tap(got[0].rows[4][0].Data) // всё на полу
+
+	marks, _ := h.db.MarksRange(ctx, "2026-10-31", "2026-10-31")
+	if m := marks["2026-10-31"]; len(m) != 4 || m["teeth"] != 1 || m["wake"] != 1 {
+		t.Errorf("отметки: %v", m)
+	}
+	if d, _ := h.db.GetDay(ctx, "2026-10-31"); d.FloorStatus != "yes" {
 		t.Errorf("статус: %s", d.FloorStatus)
 	}
-	if len(h.tg.msgs) != msgs {
+	if e := h.tg.lastEdit(); !strings.HasPrefix(e.text, "Пол дня взят ✅") || len(e.rows) != 0 {
+		t.Errorf("итог: %+v", e)
+	}
+	if len(h.tg.matching("🌙")) != 1 {
 		t.Error("новое сообщение вместо редактирования")
 	}
-	if len(h.tg.edits) != 1 || h.tg.edits[0].id != got[0].id || h.tg.edits[0].text != "Засчитано." {
-		t.Errorf("правки: %+v", h.tg.edits)
-	}
+}
 
-	// Повторное нажатие перезаписывает.
-	h.app.OnCallback(ctx, got[0].buttons[1].Data, got[0].id)
-	d, _ = h.db.GetDay(ctx, "2026-10-31")
-	if d.FloorStatus != "no" {
-		t.Errorf("статус после повтора: %s", d.FloorStatus)
+func TestMissTwiceAndReturnStep(t *testing.T) {
+	h := newHarness(t)
+	done := func(date string) {
+		h.tick(date+" 21:00", plus5)
+		got := h.tg.matching("🌙")
+		h.now = at(date+" 21:10", plus5)
+		last := got[len(got)-1]
+		h.app.OnCallback(ctx, last.rows[1][0].Data, last.id) // зубы на полу
+		h.app.OnCallback(ctx, last.rows[4][1].Data, last.id) // готово: остальное мимо
 	}
-
-	h.tick("2026-10-31 21:06", plus5)
-	if len(h.tg.matching("🌙")) != 1 {
-		t.Error("вечер продублирован")
+	done("2026-10-30")
+	if d, _ := h.db.GetDay(ctx, "2026-10-30"); d.FloorStatus != "no" {
+		t.Errorf("статус: %s", d.FloorStatus)
+	}
+	done("2026-10-31")
+	if e := h.tg.lastEdit().text; !strings.Contains(e, "🚶 Улица — второй день подряд. Завтра только пол: выйти за дверь.") {
+		t.Errorf("итог второго дня: %q", e)
+	}
+	// Утром шаг — пол первой пропущенной привычки, без Claude.
+	calls := len(h.llm.prompts)
+	h.tick("2026-11-01 10:00", plus5)
+	m := h.tg.matching("☀️")
+	if len(m) != 1 || !strings.Contains(m[0].text, "Шаг на сегодня: когда звонит будильник в 07:00 → сел на кровати. Вчера мимо") {
+		t.Fatalf("утро: %+v", m)
+	}
+	if len(h.llm.prompts) != calls {
+		t.Error("шаг после пропуска не должен звать Claude")
 	}
 }
 
@@ -764,7 +838,7 @@ func TestEveningFollowsHabitsFile(t *testing.T) {
 	writeHabits(t, h, func(f *habits.File) { f.Habits[3].Paused = true })
 	h.tick("2026-10-31 21:00", plus5)
 	got := h.tg.matching("🌙")
-	if len(got) != 1 || got[0].text != "🌙 Пол на сегодня: зубы · выйти на улицу" {
+	if len(got) != 1 || !strings.Contains(got[0].text, "Улица") || strings.Contains(got[0].text, "Вещь на место") || len(got[0].rows) != 4 {
 		t.Fatalf("вечер: %+v", got)
 	}
 }

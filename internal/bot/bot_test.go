@@ -30,6 +30,13 @@ type fakeHandler struct {
 	answer   string
 	settings int
 	webapp   []string
+	watch    []string
+}
+
+func (h *fakeHandler) OnWatch(_ context.Context, chatID int64, name, payload string) {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	h.watch = append(h.watch, fmt.Sprintf("%d %s %s", chatID, name, payload))
 }
 
 func (h *fakeHandler) OnCallback(_ context.Context, data string, _ int) string {
@@ -306,5 +313,55 @@ func TestMenuAppAndSetup(t *testing.T) {
 		if len(srv.Calls(m)) != n {
 			t.Errorf("%s не вызван", m)
 		}
+	}
+}
+
+func TestWatchInviteFromStranger(t *testing.T) {
+	_, srv, h, _ := setup(t)
+	srv.PushText(stranger, "/start wabc123")
+	srv.PushText(stranger, "привет")
+	waitFor(t, func() bool {
+		h.mu.Lock()
+		defer h.mu.Unlock()
+		return len(h.watch) == 1
+	})
+	time.Sleep(50 * time.Millisecond)
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	if !strings.HasSuffix(h.watch[0], " wabc123") || len(h.texts) != 0 {
+		t.Errorf("watch = %v, texts = %v", h.watch, h.texts)
+	}
+}
+
+func TestRowsEditAndLink(t *testing.T) {
+	b, srv, _, _ := setup(t)
+	ctx := context.Background()
+	rows := [][]core.Button{{{Text: "a", Data: "1"}}, {{Text: "b", Data: "2"}, {Text: "c", Data: "3"}}}
+	if _, err := b.SendRows(ctx, "т", rows); err != nil {
+		t.Fatal(err)
+	}
+	if m := srv.Calls("sendMessage")[0].Params["reply_markup"]; !strings.Contains(m, `[[{"text":"a","callback_data":"1"}],[{"text":"b"`) {
+		t.Errorf("reply_markup: %s", m)
+	}
+	if err := b.EditRows(ctx, 7, "т2", rows); err != nil {
+		t.Fatal(err)
+	}
+	if m := srv.Calls("editMessageText")[0].Params["reply_markup"]; !strings.Contains(m, `"callback_data":"3"`) {
+		t.Errorf("edit reply_markup: %s", m)
+	}
+	if err := b.SendTo(ctx, 99, "итог"); err != nil {
+		t.Fatal(err)
+	}
+	if c := srv.Calls("sendMessage")[1].Params["chat_id"]; c != "99" {
+		t.Errorf("chat_id = %s", c)
+	}
+	for range 2 {
+		link, err := b.StartLink(ctx, "wtok")
+		if err != nil || link != "https://t.me/floor_test_bot?start=wtok" {
+			t.Fatalf("link = %q, %v", link, err)
+		}
+	}
+	if n := len(srv.Calls("getMe")); n != 1 {
+		t.Errorf("getMe вызван %d раз, имя должно запоминаться", n)
 	}
 }

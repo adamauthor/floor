@@ -1,5 +1,5 @@
-// Package habits хранит список привычек и их якорей: что развивается и что запускает
-// действие. Источник правды — файл HABITS_FILE, правится руками (docs/HABITS.md).
+// Package habits хранит список привычек: что развивается, что запускает действие,
+// какая у него цель и какой минимум. Источник правды — файл HABITS_FILE (docs/HABITS.md).
 package habits
 
 import (
@@ -16,16 +16,19 @@ import (
 // по одному действию в одном контексте, а не списком из десяти пунктов.
 const MaxActive = 5
 
-// Habit — одна привычка: «когда <Anchor> → <Action>».
+// Habit — одна привычка: «когда <Anchor> → <Action>», и минимум на плохой день.
 type Habit struct {
-	ID         string `json:"id"`
-	Emoji      string `json:"emoji,omitempty"`
-	Title      string `json:"title"`
-	Anchor     string `json:"anchor"` // контекст-триггер; {wake} заменяется на WAKE_ANCHOR
-	Action     string `json:"action"`
-	FloorLabel string `json:"floor_label,omitempty"` // непусто — входит в пол дня
-	Since      string `json:"since"`                 // YYYY-MM-DD, от неё считаются недели
-	Paused     bool   `json:"paused,omitempty"`
+	ID     string `json:"id"`
+	Emoji  string `json:"emoji,omitempty"`
+	Title  string `json:"title"`
+	Anchor string `json:"anchor"` // контекст-триггер; {wake} заменяется на WAKE_ANCHOR
+	Action string `json:"action"` // цель: полная версия действия
+	Floor  string `json:"floor"`  // пол: минимум, который выполним даже в плохой день
+	Since  string `json:"since"`  // YYYY-MM-DD, от неё считаются недели
+	Paused bool   `json:"paused,omitempty"`
+	Auto   bool   `json:"auto,omitempty"` // на автомате: выпущена с карточки, бот о ней не спрашивает
+
+	OldFloor string `json:"floor_label,omitempty"` // прежнее имя поля, Parse переносит его в Floor
 }
 
 // File — содержимое habits.json.
@@ -33,7 +36,7 @@ type File struct {
 	Habits []Habit `json:"habits"`
 }
 
-// Defaults — стартовый набор: пол дня из ТЗ плюс подъём, у каждого свой якорь.
+// Defaults — стартовый набор: подъём и три привычки, у каждой свой якорь, цель и пол.
 // Улица и вещь идут цепочкой: окончание одного действия запускает следующее.
 func Defaults(today string) File {
 	return File{Habits: []Habit{
@@ -41,24 +44,25 @@ func Defaults(today string) File {
 			ID: "wake", Emoji: "⏰", Title: "Подъём", Since: today,
 			Anchor: "звонит будильник в {wake}",
 			Action: "сразу встаю, ноги на пол",
+			Floor:  "сел на кровати",
 		},
 		{
 			ID: "teeth", Emoji: "🦷", Title: "Зубы", Since: today,
-			Anchor:     "встал с кровати",
-			Action:     "зубы до телефона",
-			FloorLabel: "зубы",
+			Anchor: "встал с кровати",
+			Action: "зубы до телефона",
+			Floor:  "зубы",
 		},
 		{
 			ID: "outside", Emoji: "🚶", Title: "Улица", Since: today,
-			Anchor:     "закрыл ноутбук после работы",
-			Action:     "куртка и 20 минут на улице",
-			FloorLabel: "выйти на улицу",
+			Anchor: "закрыл ноутбук после работы",
+			Action: "куртка и 20 минут на улице",
+			Floor:  "выйти за дверь",
 		},
 		{
 			ID: "tidy", Emoji: "📦", Title: "Вещь на место", Since: today,
-			Anchor:     "вернулся с улицы",
-			Action:     "кладу одну вещь на место",
-			FloorLabel: "одна вещь на место",
+			Anchor: "вернулся с улицы",
+			Action: "кладу одну вещь на место",
+			Floor:  "одна вещь на место",
 		},
 	}}
 }
@@ -70,6 +74,9 @@ func Parse(raw []byte) (File, error) {
 	dec.DisallowUnknownFields() // опечатка в имени поля не должна молча терять якорь
 	if err := dec.Decode(&f); err != nil {
 		return File{}, fmt.Errorf("разбор JSON: %w", err)
+	}
+	for i := range f.Habits {
+		f.Habits[i].migrate()
 	}
 	return f, f.Validate()
 }
@@ -96,12 +103,15 @@ func (f File) Validate() error {
 			errs = append(errs, fmt.Errorf("%s: нет anchor — привычка без якоря не запускается", label))
 		}
 		if strings.TrimSpace(h.Action) == "" {
-			errs = append(errs, fmt.Errorf("%s: нет action", label))
+			errs = append(errs, fmt.Errorf("%s: нет action — цели", label))
+		}
+		if strings.TrimSpace(h.Floor) == "" {
+			errs = append(errs, fmt.Errorf("%s: нет floor — минимума на плохой день", label))
 		}
 		if _, err := time.Parse(time.DateOnly, h.Since); err != nil {
 			errs = append(errs, fmt.Errorf("%s: since должен быть в виде YYYY-MM-DD", label))
 		}
-		if !h.Paused {
+		if !h.Paused && !h.Auto {
 			active++
 		}
 	}
@@ -180,26 +190,45 @@ func Encode(f File) ([]byte, error) {
 	return []byte(b.String()), nil
 }
 
-// Active — привычки без паузы, в порядке файла.
+// migrate переносит старое поле floor_label в floor: раньше пол был подписью
+// «входит в пол дня», теперь это минимум у каждой привычки.
+func (h *Habit) migrate() {
+	if h.Floor == "" {
+		h.Floor = h.OldFloor
+	}
+	h.OldFloor = ""
+}
+
+// Active — привычки в работе: без паузы и не выпущенные на автомат, в порядке файла.
 func (f File) Active() []Habit {
 	out := make([]Habit, 0, len(f.Habits))
 	for _, h := range f.Habits {
-		if !h.Paused {
+		if !h.Paused && !h.Auto {
 			out = append(out, h)
 		}
 	}
 	return out
 }
 
-// FloorLabels — состав пола дня для вечернего сообщения.
-func (f File) FloorLabels() []string {
-	var out []string
-	for _, h := range f.Active() {
-		if h.FloorLabel != "" {
-			out = append(out, h.FloorLabel)
+// Automatic — привычки, выпущенные на автомат.
+func (f File) Automatic() []Habit {
+	var out []Habit
+	for _, h := range f.Habits {
+		if h.Auto && !h.Paused {
+			out = append(out, h)
 		}
 	}
 	return out
+}
+
+// Find — привычка по id.
+func (f File) Find(id string) (Habit, bool) {
+	for _, h := range f.Habits {
+		if h.ID == id {
+			return h, true
+		}
+	}
+	return Habit{}, false
 }
 
 // AnchorText подставляет время подъёма в текст якоря.

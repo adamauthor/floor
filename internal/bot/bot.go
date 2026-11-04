@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"log/slog"
 	"strings"
+	"sync"
 
 	tg "github.com/go-telegram/bot"
 	"github.com/go-telegram/bot/models"
@@ -22,6 +23,8 @@ type Handler interface {
 	OnStart(ctx context.Context)
 	OnSettings(ctx context.Context)
 	OnWebAppData(ctx context.Context, data string)
+	// OnWatch — чужой человек открыл ссылку-приглашение на итог недели.
+	OnWatch(ctx context.Context, chatID int64, name, payload string)
 }
 
 // Bot — клиент Telegram для одного владельца.
@@ -31,6 +34,9 @@ type Bot struct {
 	token   string
 	log     *slog.Logger
 	handler Handler
+
+	mu       sync.Mutex
+	username string // имя бота для ссылок t.me, узнаётся при первой нужде
 }
 
 // New создаёт клиента. Сеть не трогает: без неё процесс должен стартовать и ждать.
@@ -95,7 +101,15 @@ func (b *Bot) onCallback(ctx context.Context, q *models.CallbackQuery) {
 }
 
 func (b *Bot) onMessage(ctx context.Context, m *models.Message) {
-	if m.From == nil || m.From.ID != b.owner {
+	if m.From == nil {
+		return
+	}
+	if m.From.ID != b.owner {
+		// От чужих принимается только ссылка-приглашение; её проверяет ядро.
+		if payload, ok := strings.CutPrefix(strings.TrimSpace(m.Text), "/start w"); ok && m.Chat.Type == models.ChatTypePrivate {
+			b.handler.OnWatch(ctx, m.Chat.ID, m.From.FirstName, "w"+payload)
+			return
+		}
 		b.log.Debug("foreign_update_ignored", "kind", "message")
 		return
 	}
@@ -118,21 +132,65 @@ func (b *Bot) onMessage(ctx context.Context, m *models.Message) {
 	}
 }
 
-// Send отправляет сообщение владельцу и возвращает его id.
+// Send отправляет сообщение владельцу с одним рядом кнопок и возвращает его id.
 func (b *Bot) Send(ctx context.Context, text string, buttons []core.Button) (int, error) {
-	params := &tg.SendMessageParams{ChatID: b.owner, Text: text, ParseMode: models.ParseModeHTML}
+	var rows [][]core.Button
 	if len(buttons) > 0 {
-		row := make([]models.InlineKeyboardButton, 0, len(buttons))
-		for _, btn := range buttons {
-			row = append(row, models.InlineKeyboardButton{Text: btn.Text, CallbackData: btn.Data})
-		}
-		params.ReplyMarkup = models.InlineKeyboardMarkup{InlineKeyboard: [][]models.InlineKeyboardButton{row}}
+		rows = [][]core.Button{buttons}
+	}
+	return b.SendRows(ctx, text, rows)
+}
+
+// SendRows отправляет сообщение владельцу с кнопками в несколько рядов.
+func (b *Bot) SendRows(ctx context.Context, text string, rows [][]core.Button) (int, error) {
+	params := &tg.SendMessageParams{ChatID: b.owner, Text: text, ParseMode: models.ParseModeHTML}
+	if kb := keyboard(rows); kb != nil {
+		params.ReplyMarkup = kb
 	}
 	msg, err := b.api.SendMessage(ctx, params)
 	if err != nil {
 		return 0, b.scrub(err)
 	}
 	return msg.ID, nil
+}
+
+// SendTo отправляет сообщение другому человеку — тому, кто получает итог недели.
+func (b *Bot) SendTo(ctx context.Context, chatID int64, text string) error {
+	_, err := b.api.SendMessage(ctx, &tg.SendMessageParams{ChatID: chatID, Text: text, ParseMode: models.ParseModeHTML})
+	return b.scrub(err)
+}
+
+func keyboard(rows [][]core.Button) *models.InlineKeyboardMarkup {
+	if len(rows) == 0 {
+		return nil
+	}
+	kb := make([][]models.InlineKeyboardButton, 0, len(rows))
+	for _, r := range rows {
+		row := make([]models.InlineKeyboardButton, 0, len(r))
+		for _, btn := range r {
+			row = append(row, models.InlineKeyboardButton{Text: btn.Text, CallbackData: btn.Data})
+		}
+		kb = append(kb, row)
+	}
+	return &models.InlineKeyboardMarkup{InlineKeyboard: kb}
+}
+
+// StartLink — ссылка t.me на бота с параметром /start.
+func (b *Bot) StartLink(ctx context.Context, payload string) (string, error) {
+	b.mu.Lock()
+	name := b.username
+	b.mu.Unlock()
+	if name == "" {
+		me, err := b.api.GetMe(ctx)
+		if err != nil {
+			return "", b.scrub(err)
+		}
+		name = me.Username
+		b.mu.Lock()
+		b.username = name
+		b.mu.Unlock()
+	}
+	return "https://t.me/" + name + "?start=" + payload, nil
 }
 
 // SetMenuApp ставит владельцу кнопку меню слева от поля ввода, открывающую страницу.
@@ -181,9 +239,18 @@ const (
 
 // Edit заменяет текст сообщения и убирает кнопки.
 func (b *Bot) Edit(ctx context.Context, msgID int, text string) error {
-	_, err := b.api.EditMessageText(ctx, &tg.EditMessageTextParams{
+	return b.EditRows(ctx, msgID, text, nil)
+}
+
+// EditRows заменяет текст и кнопки сообщения; без рядов кнопки пропадают.
+func (b *Bot) EditRows(ctx context.Context, msgID int, text string, rows [][]core.Button) error {
+	params := &tg.EditMessageTextParams{
 		ChatID: b.owner, MessageID: msgID, Text: text, ParseMode: models.ParseModeHTML,
-	})
+	}
+	if kb := keyboard(rows); kb != nil {
+		params.ReplyMarkup = kb
+	}
+	_, err := b.api.EditMessageText(ctx, params)
 	if err == nil {
 		return nil
 	}

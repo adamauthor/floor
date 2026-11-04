@@ -29,7 +29,9 @@ type State struct {
 	Rev      string          `json:"rev"` // версия, от которой начата правка
 	Settings config.Settings `json:"s"`
 	Habits   []habits.Habit  `json:"h"`
-	API      string          `json:"api,omitempty"` // куда слать сохранение; пусто — туннель не поднят
+	API      string          `json:"api,omitempty"`   // куда слать сохранение; пусто — туннель не поднят
+	Watch    string          `json:"watch,omitempty"` // кто получает итог недели, только для показа
+	Share    *bool           `json:"share,omitempty"` // от страницы: включить или выключить итог недели второму человеку
 }
 
 // Rev — короткий отпечаток настроек: правка, начатая со старой версии, не перезапишет новую.
@@ -116,6 +118,10 @@ func Changes(oldS, newS config.Settings, oldH, newH []habits.Habit) []string {
 			add("«%s» на паузе", h.Title)
 		case prev.Paused != h.Paused:
 			add("«%s» снова в деле", h.Title)
+		case prev.Auto != h.Auto && h.Auto:
+			add("«%s» на автомате", h.Title)
+		case prev.Auto != h.Auto:
+			add("«%s» снова на карточке", h.Title)
 		case prev != h:
 			add("«%s» изменена", h.Title)
 		}

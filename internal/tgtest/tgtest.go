@@ -146,6 +146,8 @@ func (s *Server) handle(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	switch method {
+	case "getMe":
+		fmt.Fprint(w, `{"ok":true,"result":{"id":1,"is_bot":true,"first_name":"Floor","username":"floor_test_bot"}}`)
 	case "sendMessage", "editMessageText":
 		s.nextID++
 		fmt.Fprintf(w, `{"ok":true,"result":{"message_id":%d,"date":1,"chat":{"id":1,"type":"private"}}}`, s.nextID)

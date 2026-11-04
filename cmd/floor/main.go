@@ -291,7 +291,7 @@ func showHabits(ctx context.Context) error {
 	if err != nil {
 		return fmt.Errorf("%s:\n%w", cfg.HabitsFile, err)
 	}
-	card := render.HabitCard(f.Active(), f.FloorLabels(), today, cfg.WakeAnchor.String())
+	card := render.HabitCard(f, today, cfg.WakeAnchor.String())
 	fmt.Println(render.StripTags(card))
 	fmt.Println("\nФайл:", cfg.HabitsFile)
 	return nil

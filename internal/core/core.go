@@ -36,7 +36,15 @@ type Button struct {
 // Messenger — исходящие действия в Telegram.
 type Messenger interface {
 	Send(ctx context.Context, text string, buttons []Button) (int, error)
+	// SendRows — то же с кнопками в несколько рядов.
+	SendRows(ctx context.Context, text string, rows [][]Button) (int, error)
+	// SendTo пишет другому человеку: тому, кто получает итог недели.
+	SendTo(ctx context.Context, chatID int64, text string) error
 	Edit(ctx context.Context, msgID int, text string) error
+	// EditRows меняет текст и кнопки; без рядов кнопки пропадают.
+	EditRows(ctx context.Context, msgID int, text string, rows [][]Button) error
+	// StartLink — ссылка t.me на бота с параметром /start.
+	StartLink(ctx context.Context, payload string) (string, error)
 	Pin(ctx context.Context, msgID int) error
 	Typing(ctx context.Context) error
 	// SetMenuApp ставит кнопку меню слева от поля ввода, открывающую страницу настроек.
@@ -71,6 +79,7 @@ type App struct {
 	API func(ctx context.Context) (string, error)
 
 	tickMu   sync.Mutex // один тик за раз: /start и расписание не должны отправить дважды
+	markMu   sync.Mutex // нажатия кнопок отметок по одному: быстрые тапы не теряются
 	cfgMu    sync.RWMutex
 	mu       sync.Mutex
 	backoff  schedule.Backoff
@@ -226,6 +235,7 @@ func (a *App) Tick(ctx context.Context, t time.Time) {
 		a.morning(ctx, local),
 		a.evening(ctx, local),
 		a.weekly(ctx, local),
+		a.dataGap(ctx, local),
 	)
 
 	a.mu.Lock()
@@ -305,7 +315,7 @@ func shortHash(s string) string {
 func (a *App) syncHabits(ctx context.Context, local time.Time) error {
 	today := local.Format(time.DateOnly)
 	f := a.currentHabits(ctx, today)
-	card := render.HabitCard(f.Active(), f.FloorLabels(), today, a.conf().WakeAnchor.String())
+	card := render.HabitCard(f, today, a.conf().WakeAnchor.String())
 	hash := shortHash(card)
 
 	stored, err := a.Store.GetKV(ctx, kvPinnedHash)
@@ -359,7 +369,11 @@ func (a *App) morning(ctx context.Context, local time.Time) error {
 	if err != nil {
 		return err
 	}
-	data := render.MorningData{Date: date, StepsYesterday: yesterday.Steps, Step: a.stepOfDay(ctx, date)}
+	step := a.returnStep(ctx, date)
+	if step == "" {
+		step = a.stepOfDay(ctx, date)
+	}
+	data := render.MorningData{Date: date, StepsYesterday: yesterday.Steps, Step: step}
 	if day.WakeAt != nil && day.WakeAt.In(local.Location()).Format(time.DateOnly) == date {
 		data.WakeAt, data.WakeDeltaMin, data.SleepMinutes = day.WakeAt, day.WakeDeltaMin, day.SleepMinutes
 	}
@@ -406,12 +420,8 @@ func (a *App) evening(ctx context.Context, local time.Time) error {
 	if day.EveningSentAt != nil {
 		return nil
 	}
-	f := a.currentHabits(ctx, date)
-	buttons := []Button{
-		{Text: "✅ Да", Data: callbackPrefix + date + ":" + metrics.StatusYes},
-		{Text: "❌ Нет", Data: callbackPrefix + date + ":" + metrics.StatusNo},
-	}
-	id, err := a.TG.Send(ctx, render.Evening(f.FloorLabels()), buttons)
+	active := a.currentHabits(ctx, date).Active()
+	id, err := a.TG.SendRows(ctx, render.Evening(active, a.conf().WakeAnchor.String()), markRows(date, active, nil))
 	if err != nil {
 		return fmt.Errorf("вечер: %w", err)
 	}
@@ -446,15 +456,23 @@ func (a *App) weekly(ctx context.Context, local time.Time) error {
 		}
 	}
 	f := a.currentHabits(ctx, today)
-	text := render.Weekly(render.WeeklyData{
-		Monday: key, Today: today, Days: plainDays(week), Habits: f.Active(),
-		Wake: a.conf().WakeAnchor.String(), Summary: summary,
-	}, a.rules())
-	if _, err := a.TG.Send(ctx, text, nil); err != nil {
+	data, err := a.weekData(ctx, key, today, week, f)
+	if err != nil {
+		return err
+	}
+	data.Summary = summary
+	if _, err := a.TG.Send(ctx, render.Weekly(data, a.rules()), nil); err != nil {
 		return fmt.Errorf("неделя: %w", err)
 	}
 	a.Log.Info("weekly_sent", "week", key)
-	return a.Store.SetKV(ctx, kvWeeklySent, key)
+	if err := a.Store.SetKV(ctx, kvWeeklySent, key); err != nil {
+		return err
+	}
+	// Дальше — необязательное: сбой не должен повторять саму сводку.
+	a.shareWeekly(ctx, data)
+	a.sendReview(ctx, key, f)
+	a.monthly(ctx, local, f)
+	return nil
 }
 
 func plainDays(days []store.Day) []metrics.Day {
@@ -472,7 +490,12 @@ func (a *App) promptContext(ctx context.Context, today string, n int) (table, hs
 		return "", "", err
 	}
 	f := a.currentHabits(ctx, today)
-	return render.ContextTable(plainDays(days)), render.HabitsContext(f.Active(), today, a.conf().WakeAnchor.String()), nil
+	marks, err := a.Store.MarksRange(ctx, metrics.AddDays(today, 1-n), today)
+	if err != nil {
+		return "", "", err
+	}
+	return render.ContextTable(plainDays(days), f.Active(), levels(marks)),
+		render.HabitsContext(f.Active(), today, a.conf().WakeAnchor.String()), nil
 }
 
 // ask вызывает Claude с учётом дневного лимита; false — использовать fallback.
@@ -491,8 +514,23 @@ func (a *App) ask(ctx context.Context, date, prompt, scenario string) (string, b
 	return text, true
 }
 
-// OnCallback обрабатывает нажатие кнопки пола и возвращает текст всплывающего ответа.
+// OnCallback обрабатывает нажатие кнопки и возвращает текст всплывающего ответа.
 func (a *App) OnCallback(ctx context.Context, data string, msgID int) string {
+	switch {
+	case data == callbackNoop:
+		return ""
+	case strings.HasPrefix(data, callbackMark):
+		return a.onMark(ctx, strings.TrimPrefix(data, callbackMark), msgID)
+	case strings.HasPrefix(data, callbackWeek):
+		return a.onReview(ctx, strings.TrimPrefix(data, callbackWeek), msgID)
+	case strings.HasPrefix(data, callbackMonth):
+		return a.onMonthly(ctx, strings.TrimPrefix(data, callbackMonth), msgID)
+	}
+	return a.onFloor(ctx, data, msgID)
+}
+
+// onFloor — кнопки «Да/Нет» из сообщений до отметок по привычкам.
+func (a *App) onFloor(ctx context.Context, data string, msgID int) string {
 	date, status, ok := parseCallback(data)
 	if !ok {
 		a.Log.Warn("callback_invalid")

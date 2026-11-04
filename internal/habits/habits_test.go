@@ -14,22 +14,24 @@ func TestDefaultsValid(t *testing.T) {
 	if err := f.Validate(); err != nil {
 		t.Fatal(err)
 	}
-	got := strings.Join(f.FloorLabels(), " · ")
-	if got != "зубы · выйти на улицу · одна вещь на место" {
-		t.Errorf("пол дня = %q", got)
+	for _, h := range f.Habits {
+		if h.Floor == "" || h.Action == "" {
+			t.Errorf("%s: у привычки должны быть цель и пол", h.ID)
+		}
 	}
 }
 
 func TestParseRejects(t *testing.T) {
-	ok := `{"id":"a","title":"А","anchor":"когда","action":"что","since":"2026-10-31"}`
+	ok := `{"id":"a","title":"А","anchor":"когда","action":"что","floor":"п","since":"2026-10-31"}`
 	tests := []struct{ name, in, want string }{
 		{"не JSON", `{`, "разбор JSON"},
-		{"опечатка в поле", `{"habits":[{"id":"a","title":"А","anhor":"x","action":"y","since":"2026-10-31"}]}`, "разбор JSON"},
-		{"нет якоря", `{"habits":[{"id":"a","title":"А","action":"что","since":"2026-10-31"}]}`, "без якоря"},
-		{"нет действия", `{"habits":[{"id":"a","title":"А","anchor":"x","since":"2026-10-31"}]}`, "нет action"},
-		{"нет названия", `{"habits":[{"id":"a","anchor":"x","action":"y","since":"2026-10-31"}]}`, "нет title"},
-		{"нет id", `{"habits":[{"title":"А","anchor":"x","action":"y","since":"2026-10-31"}]}`, "нет id"},
-		{"плохая дата", `{"habits":[{"id":"a","title":"А","anchor":"x","action":"y","since":"вчера"}]}`, "since"},
+		{"опечатка в поле", `{"habits":[{"id":"a","title":"А","anhor":"x","action":"y","floor":"п","since":"2026-10-31"}]}`, "разбор JSON"},
+		{"нет якоря", `{"habits":[{"id":"a","title":"А","action":"что","floor":"п","since":"2026-10-31"}]}`, "без якоря"},
+		{"нет действия", `{"habits":[{"id":"a","title":"А","anchor":"x","floor":"п","since":"2026-10-31"}]}`, "нет action"},
+		{"нет пола", `{"habits":[{"id":"a","title":"А","anchor":"x","action":"y","since":"2026-10-31"}]}`, "нет floor"},
+		{"нет названия", `{"habits":[{"id":"a","anchor":"x","action":"y","floor":"п","since":"2026-10-31"}]}`, "нет title"},
+		{"нет id", `{"habits":[{"title":"А","anchor":"x","action":"y","floor":"п","since":"2026-10-31"}]}`, "нет id"},
+		{"плохая дата", `{"habits":[{"id":"a","title":"А","anchor":"x","action":"y","floor":"п","since":"вчера"}]}`, "since"},
 		{"повтор id", `{"habits":[` + ok + `,` + ok + `]}`, "повторяется"},
 		{"пусто", `{"habits":[]}`, "ни одной"},
 		{"слишком много", `{"habits":[` + many(MaxActive+1) + `]}`, "предел"},
@@ -47,19 +49,31 @@ func TestParseRejects(t *testing.T) {
 func many(n int) string {
 	var parts []string
 	for i := range n {
-		parts = append(parts, `{"id":"h`+string(rune('a'+i))+`","title":"А","anchor":"x","action":"y","since":"2026-10-31"}`)
+		parts = append(parts, `{"id":"h`+string(rune('a'+i))+`","title":"А","anchor":"x","action":"y","floor":"п","since":"2026-10-31"}`)
 	}
 	return strings.Join(parts, ",")
 }
 
 func TestPausedDoesNotCount(t *testing.T) {
-	raw := `{"habits":[` + many(MaxActive) + `,{"id":"p","title":"П","anchor":"x","action":"y","since":"2026-10-31","paused":true,"floor_label":"п"}]}`
+	raw := `{"habits":[` + many(MaxActive) + `,{"id":"p","title":"П","anchor":"x","action":"y","floor":"п","since":"2026-10-31","paused":true},` +
+		`{"id":"q","title":"Q","anchor":"x","action":"y","floor":"п","since":"2026-10-31","auto":true}]}`
 	f, err := Parse([]byte(raw))
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(f.Active()) != MaxActive || len(f.FloorLabels()) != 0 {
-		t.Errorf("active = %d, labels = %v", len(f.Active()), f.FloorLabels())
+	if len(f.Active()) != MaxActive || len(f.Automatic()) != 1 || f.Automatic()[0].ID != "q" {
+		t.Errorf("active = %d, auto = %v", len(f.Active()), f.Automatic())
+	}
+}
+
+func TestOldFloorLabelMigrates(t *testing.T) {
+	f, err := Parse([]byte(`{"habits":[{"id":"a","title":"А","anchor":"x","action":"y","floor_label":"минимум","since":"2026-10-31"}]}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	raw, _ := Encode(f)
+	if f.Habits[0].Floor != "минимум" || strings.Contains(string(raw), "floor_label") {
+		t.Errorf("floor = %q, файл: %s", f.Habits[0].Floor, raw)
 	}
 }
 

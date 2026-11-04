@@ -69,7 +69,7 @@ type Server struct {
 	Token  string
 	Owner  int64
 	Origin string // откуда разрешены запросы, например https://adamauthor.github.io
-	Save   func(ctx context.Context, data string) (text string, ok bool)
+	Save   func(ctx context.Context, data string) SaveResult
 	Log    *slog.Logger
 	Now    func() time.Time
 }
@@ -79,9 +79,12 @@ type saveRequest struct {
 	Data string `json:"data"`
 }
 
-type saveResponse struct {
+// SaveResult — итог сохранения: текст для чата и новая версия настроек, чтобы
+// страница могла остаться открытой и править дальше.
+type SaveResult struct {
 	OK   bool   `json:"ok"`
 	Text string `json:"text"`
+	Rev  string `json:"rev,omitempty"`
 }
 
 func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
@@ -105,7 +108,7 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 	var req saveRequest
 	if err := json.NewDecoder(io.LimitReader(r.Body, 64<<10)).Decode(&req); err != nil {
-		s.reply(w, http.StatusBadRequest, saveResponse{Text: "Не разобрал запрос."})
+		s.reply(w, http.StatusBadRequest, SaveResult{Text: "Не разобрал запрос."})
 		return
 	}
 	user, err := CheckInitData(req.Init, s.Token, s.Now())
@@ -114,14 +117,13 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 	if err != nil {
 		s.Log.Warn("webapp_rejected", "error", err)
-		s.reply(w, http.StatusForbidden, saveResponse{Text: "Не сохранил: " + err.Error()})
+		s.reply(w, http.StatusForbidden, SaveResult{Text: "Не сохранил: " + err.Error()})
 		return
 	}
-	text, ok := s.Save(r.Context(), req.Data)
-	s.reply(w, http.StatusOK, saveResponse{OK: ok, Text: text})
+	s.reply(w, http.StatusOK, s.Save(r.Context(), req.Data))
 }
 
-func (s *Server) reply(w http.ResponseWriter, code int, resp saveResponse) {
+func (s *Server) reply(w http.ResponseWriter, code int, resp SaveResult) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(code)
 	_ = json.NewEncoder(w).Encode(resp)

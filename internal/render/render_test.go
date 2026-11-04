@@ -93,9 +93,29 @@ func TestMorningEscapesHTML(t *testing.T) {
 }
 
 func TestEveningAndReplies(t *testing.T) {
-	got := Evening([]string{"зубы", "выйти на улицу", "одна вещь на место"})
-	if got != "🌙 Пол на сегодня: зубы · выйти на улицу · одна вещь на место" {
-		t.Errorf("Evening = %q", got)
+	hs := habits.Defaults("2026-10-31").Habits
+	got := Evening(hs, "07:00")
+	for _, want := range []string{"🌙 <b>Как прошёл день?</b>", "🦷 Зубы\nпол: зубы · цель: зубы до телефона", "· → пол → цель"} {
+		if !strings.Contains(got, want) {
+			t.Errorf("нет %q в:\n%s", want, got)
+		}
+	}
+	if MarkButton(hs[1], 0, false) != "🦷 Зубы · " || MarkButton(hs[1], 1, true) != "🦷 Зубы · пол" ||
+		MarkButton(hs[1], 2, true) != "🦷 Зубы · цель ✅" || MarkButton(hs[1], 0, true) != "🦷 Зубы · ✕" {
+		t.Error("подписи кнопок")
+	}
+	reply := MarksReply(hs, map[string]int{"wake": 2, "teeth": 1, "outside": 0, "tidy": 0}, map[string]bool{"outside": true})
+	for _, want := range []string{"Ок. Завтра просто пол.", "Цель: ⏰ Подъём", "Пол: 🦷 Зубы", "Мимо: 🚶 Улица · 📦 Вещь на место",
+		"🚶 Улица — второй день подряд. Завтра только пол: выйти за дверь."} {
+		if !strings.Contains(reply, want) {
+			t.Errorf("нет %q в:\n%s", want, reply)
+		}
+	}
+	if got := MarksReply(hs, map[string]int{"wake": 1, "teeth": 1, "outside": 2, "tidy": 1}, nil); !strings.HasPrefix(got, "Пол дня взят ✅") {
+		t.Errorf("всё на полу: %q", got)
+	}
+	if got := ReturnStep(hs[2], "07:00"); got != "Шаг на сегодня: когда закрыл ноутбук после работы → выйти за дверь. Вчера мимо, сегодня хватит минимума." {
+		t.Errorf("ReturnStep = %q", got)
 	}
 	tests := []struct {
 		status string
@@ -127,12 +147,20 @@ func weekDays() []metrics.Day {
 }
 
 func TestWeekTable(t *testing.T) {
-	got := weekTable(weekDays(), "2026-11-01", rules)
+	hs := habits.Defaults("2026-10-26").Habits[1:3]
+	marks := map[string]map[string]int{
+		"2026-10-26": {"teeth": 2, "outside": 1}, "2026-10-28": {"teeth": 0, "outside": 0},
+	}
+	got := weekTable(weekDays(), "2026-11-01", rules, hs, marks)
 	want := strings.Join([]string{
 		"        Пн  Вт  Ср  Чт  Пт  Сб  Вс",
 		"Подъём  ✅  ✅  ·   ✅  ·   ·   ✅",
 		"Шаги    4к  6к  2к  5к  8к  ·   …",
 		"Пол     ✅  ✅  ❌  ✅  ✅  ·   …",
+		"Зубы    ●   ·   ✕   ·   ·   ·   …",
+		"Улица   ○   ·   ✕   ·   ·   ·   …",
+		"",
+		"● цель  ○ пол  ✕ мимо",
 	}, "\n")
 	if got != want {
 		t.Errorf("\nполучено:\n%s\nожидалось:\n%s", got, want)
@@ -144,12 +172,15 @@ func TestWeekly(t *testing.T) {
 	got := Weekly(WeeklyData{
 		Monday: "2026-10-26", Today: "2026-11-01", Days: weekDays(), Habits: hs, Wake: "07:00",
 		Summary: "Получилось: a<b\nПросело: x\nНа следующую неделю: y",
+		Returns: 2, SRI: ptr(71),
 	}, rules)
 	for _, want := range []string{
 		"📅 Неделя 26 окт — 1 ноя",
 		"<pre>        Пн",
 		"Подъём в норме: 4 из 7, разброс 1 ч 50 мин",
 		"Шаги: пол взят 1 из 5",
+		"Регулярность сна: 71 из 100",
+		"Вернулся после пропуска: 2 раза",
 		"Якоря на неделю:",
 		"когда звонит будильник в 07:00 → сразу встаю, ноги на пол",
 		"когда закрыл ноутбук после работы → куртка и 20 минут на улице",
@@ -172,14 +203,15 @@ func TestWeekTitleAcrossYear(t *testing.T) {
 
 func TestHabitCard(t *testing.T) {
 	f := habits.Defaults("2026-10-31")
-	got := HabitCard(f.Active(), f.FloorLabels(), "2026-11-08", "07:00")
+	f.Habits[3].Auto = true
+	got := HabitCard(f, "2026-11-08", "07:00")
 	for _, want := range []string{
 		"📌 <b>Привычки и якоря</b>",
 		"⏰ <b>Подъём</b> · неделя 2 из ~10",
 		"когда звонит будильник в 07:00 → сразу встаю, ноги на пол",
 		"🦷 <b>Зубы</b>",
-		"когда вернулся с улицы → кладу одну вещь на место",
-		"Пол дня: зубы · выйти на улицу · одна вещь на место",
+		"когда закрыл ноутбук после работы → куртка и 20 минут на улице\nпол: выйти за дверь",
+		"На автомате: 📦 Вещь на место",
 		"Пропуск не обнуляет. Не пропускай дважды.",
 	} {
 		if !strings.Contains(got, want) {
@@ -189,13 +221,13 @@ func TestHabitCard(t *testing.T) {
 }
 
 func TestHabitCardAfterPlateauAndEscaping(t *testing.T) {
-	hs := []habits.Habit{{Title: "A<B", Anchor: "x & y", Action: "z", Since: "2026-01-01"}}
-	got := HabitCard(hs, nil, "2026-10-31", "07:00")
+	hs := []habits.Habit{{Title: "A<B", Anchor: "x & y", Action: "z", Floor: "f", Since: "2026-01-01"}}
+	got := HabitCard(habits.File{Habits: hs}, "2026-10-31", "07:00")
 	if !strings.Contains(got, "<b>A&lt;B</b> · неделя 44\n") || !strings.Contains(got, "когда x &amp; y → z") {
 		t.Errorf("карточка:\n%s", got)
 	}
-	if strings.Contains(got, "Пол дня") {
-		t.Errorf("без состава пола строки быть не должно:\n%s", got)
+	if strings.Contains(got, "На автомате") {
+		t.Errorf("без выпущенных строки быть не должно:\n%s", got)
 	}
 	if plain := StripTags(got); strings.Contains(plain, "<b>") || !strings.Contains(plain, "A<B") {
 		t.Errorf("StripTags:\n%s", plain)
@@ -206,10 +238,10 @@ func TestContextTable(t *testing.T) {
 	got := ContextTable([]metrics.Day{
 		{Date: "2026-10-31", WakeAt: wake("2026-10-31T07:24:00+05:00"), WakeDeltaMin: ptr(24), SleepMinutes: ptr(400), Steps: ptr(7812), FloorStatus: "yes"},
 		{Date: "2026-11-01"},
-	})
-	want := "дата | подъём | Δ мин | сон | шаги | пол\n" +
-		"2026-10-31 | 07:24 | +24 | 6:40 | 7812 | yes\n" +
-		"2026-11-01 | - | - | - | - | none\n"
+	}, habits.Defaults("2026-10-31").Habits[1:3], map[string]map[string]int{"2026-10-31": {"teeth": 2, "outside": 0}})
+	want := "дата | подъём | Δ мин | сон | шаги | пол дня | привычки\n" +
+		"2026-10-31 | 07:24 | +24 | 6:40 | 7812 | yes | Зубы: цель, Улица: мимо\n" +
+		"2026-11-01 | - | - | - | - | none | -\n"
 	if got != want {
 		t.Errorf("\n%s\nожидалось\n%s", got, want)
 	}
@@ -217,7 +249,7 @@ func TestContextTable(t *testing.T) {
 
 func TestHabitsContext(t *testing.T) {
 	got := HabitsContext(habits.Defaults("2026-10-31").Active(), "2026-10-31", "07:00")
-	if !strings.Contains(got, "Подъём | когда звонит будильник в 07:00 → сразу встаю, ноги на пол | неделя 1\n") {
+	if !strings.Contains(got, "Подъём | когда звонит будильник в 07:00 → сразу встаю, ноги на пол | пол: сел на кровати | неделя 1\n") {
 		t.Errorf("got:\n%s", got)
 	}
 }

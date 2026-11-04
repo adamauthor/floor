@@ -75,6 +75,10 @@ func (a *App) syncWakeDeltas(ctx context.Context) error {
 // menuState — состояние для кнопки меню вместе с текущим адресом туннеля.
 func (a *App) menuState(ctx context.Context, f habits.File) webapp.State {
 	st := webapp.NewState(a.conf().Settings(), f)
+	_, st.Watch = a.watcher(ctx)
+	if token, _ := a.Store.GetKV(ctx, kvWatchToken); st.Watch == "" && token != "" {
+		st.Watch = watchPending
+	}
 	if a.API != nil {
 		if api, err := a.API(ctx); err == nil {
 			st.API = api
@@ -85,8 +89,10 @@ func (a *App) menuState(ctx context.Context, f habits.File) webapp.State {
 	return st
 }
 
-// menuKey — что сейчас в кнопке меню: версия настроек, адрес туннеля и подпись.
-func menuKey(st webapp.State) string { return "menu " + st.Rev + " " + st.API + " " + settingsLabel }
+// menuKey — что сейчас в кнопке меню: версия настроек, адрес туннеля, подпись и получатель итога.
+func menuKey(st webapp.State) string {
+	return "menu " + st.Rev + " " + st.API + " " + settingsLabel + " " + st.Watch
+}
 
 // setMenu ставит кнопку меню с состоянием в адресе.
 func (a *App) setMenu(ctx context.Context, st webapp.State) error {
@@ -139,18 +145,22 @@ func (a *App) OnSettings(ctx context.Context) {
 // OnWebAppData — настройки со старой кнопки под полем ввода (sendData).
 func (a *App) OnWebAppData(ctx context.Context, data string) { a.SaveSettings(ctx, data) }
 
-// SaveSettings сохраняет настройки со страницы, пишет итог в чат и возвращает его.
-func (a *App) SaveSettings(ctx context.Context, data string) (string, bool) {
+// SaveSettings сохраняет настройки со страницы, пишет итог в чат и возвращает его
+// вместе с новой версией: страница остаётся открытой и может править дальше.
+func (a *App) SaveSettings(ctx context.Context, data string) webapp.SaveResult {
 	a.tickMu.Lock()
 	text, saved := a.saveSettings(ctx, data)
 	a.tickMu.Unlock()
 	if _, err := a.TG.Send(ctx, text, nil); err != nil {
 		a.Log.Warn("settings_send_failed", "error", err)
 	}
+	res := webapp.SaveResult{OK: saved, Text: text}
 	if saved {
 		a.Tick(ctx, a.Now()) // карточка, расписание и кнопка меню сразу видят новое
+		today := a.Now().In(a.location(ctx)).Format(time.DateOnly)
+		res.Rev = webapp.Rev(a.conf().Settings(), a.currentHabits(ctx, today))
 	}
-	return text, saved
+	return res
 }
 
 func (a *App) saveSettings(ctx context.Context, data string) (string, bool) {
@@ -193,12 +203,41 @@ func (a *App) saveSettings(ctx context.Context, data string) (string, bool) {
 	}
 
 	changes := webapp.Changes(cur.Settings(), next.Settings(), f.Habits, nf.Habits)
+	if st.Share != nil {
+		line, err := a.applyShare(ctx, *st.Share)
+		if err != nil {
+			a.Log.Warn("share_failed", "error", err)
+		}
+		if line != "" {
+			changes = append(changes, line)
+		}
+	}
 	a.Log.Info("settings_saved", "changes", len(changes))
 	text := "✅ Сохранено"
 	if len(changes) > 0 {
 		text += ": " + escape(strings.Join(changes, ", "))
 	}
 	return text, true
+}
+
+// applyShare включает или выключает итог недели второму человеку и говорит, что сделано.
+func (a *App) applyShare(ctx context.Context, on bool) (string, error) {
+	chat, _ := a.watcher(ctx)
+	switch {
+	case on && chat == 0:
+		link, err := a.invite(ctx)
+		if err != nil {
+			return "", err
+		}
+		return "ссылка для того, кто будет получать итог недели: " + link, nil
+	case !on:
+		token, err := a.Store.GetKV(ctx, kvWatchToken)
+		if err != nil || (chat == 0 && token == "") {
+			return "", err
+		}
+		return "итог недели больше никому не уходит", a.unwatch(ctx)
+	}
+	return "", nil
 }
 
 // normalize чистит пробелы и ставит дату начала новым привычкам.
@@ -210,7 +249,8 @@ func normalize(hs []habits.Habit, today string) []habits.Habit {
 		h.Title = strings.TrimSpace(h.Title)
 		h.Anchor = strings.TrimSpace(h.Anchor)
 		h.Action = strings.TrimSpace(h.Action)
-		h.FloorLabel = strings.TrimSpace(h.FloorLabel)
+		h.Floor = strings.TrimSpace(h.Floor)
+		h.OldFloor = ""
 		if h.Since == "" {
 			h.Since = today
 		}

@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, viewport-fit=cover">
 <meta name="robots" content="noindex">
-<title>Floor · Настройки</title>
+<title>Floor</title>
 <script src="https://telegram.org/js/telegram-web-app.js"></script>
 <style>
 :root {
@@ -166,12 +166,13 @@ body.web.dirty #save { display: block; }
     v: 1, rev: 'demo',
     s: { wake: '10:00', tol: 60, floor: 7000, goal: 10000, evening: '21:00', weekly: '20:00' },
     h: [
-      { id: 'wake', emoji: '⏰', title: 'Подъём', anchor: 'звонит будильник в {wake}', action: 'встаю и сразу открываю шторы', since: '2026-11-04' },
-      { id: 'teeth', emoji: '🦷', title: 'Зубы', anchor: 'встал с кровати', action: 'зубы до телефона', floor_label: 'зубы', since: '2026-11-04' },
-      { id: 'outside', emoji: '🚶', title: 'Улица', anchor: 'почистил зубы', action: 'одеваюсь и 10 минут на улице, хоть до магазина', floor_label: 'выйти на улицу', since: '2026-11-04' },
-      { id: 'tidy', emoji: '📦', title: 'Вещь на место', anchor: 'вернулся с улицы', action: 'кладу одну вещь на место', floor_label: 'одна вещь на место', since: '2026-11-04' },
-      { id: 'night', emoji: '🌙', title: 'Отбой', anchor: 'ответил боту на вечерний вопрос', action: 'ставлю будильник, телефон на зарядку подальше от кровати', since: '2026-11-04', paused: true },
+      { id: 'wake', emoji: '⏰', title: 'Подъём', anchor: 'звонит будильник в {wake}', action: 'встаю и сразу открываю шторы', floor: 'сел на кровати', since: '2026-11-04' },
+      { id: 'teeth', emoji: '🦷', title: 'Зубы', anchor: 'встал с кровати', action: 'зубы до телефона', floor: 'зубы', since: '2026-11-04', auto: true },
+      { id: 'outside', emoji: '🚶', title: 'Улица', anchor: 'почистил зубы', action: 'одеваюсь и 10 минут на улице', floor: 'выйти за дверь', since: '2026-11-04' },
+      { id: 'tidy', emoji: '📦', title: 'Вещь на место', anchor: 'вернулся с улицы', action: '5 минут навожу порядок', floor: 'одна вещь на место', since: '2026-11-04' },
+      { id: 'night', emoji: '🌙', title: 'Отбой', anchor: 'ответил боту на вечерний вопрос', action: 'телефон на зарядку подальше от кровати', floor: 'ставлю будильник', since: '2026-11-04', paused: true },
     ],
+    watch: 'Мама',
   };
 
   async function load() {
@@ -226,7 +227,7 @@ body.web.dirty #save { display: block; }
   }
 
   const fmt = n => String(n).replace(/\B(?=(\d{3})+(?!\d))/g, ' ');
-  const active = () => state.h.filter(h => !h.paused);
+  const active = () => state.h.filter(h => !h.paused && !h.auto);
   const anchorText = h => h.anchor.replaceAll('{wake}', state.s.wake);
   const addMin = (clock, m) => {
     const [h, mm] = clock.split(':').map(Number);
@@ -252,8 +253,9 @@ body.web.dirty #save { display: block; }
       el('span', { class: 'emoji' }, h.emoji || '•'),
       el('span', { class: 'label' },
         el('span', { class: 'name' }, h.title,
-          h.paused ? el('span', { class: 'tag' }, 'пауза') : h.floor_label ? el('span', { class: 'tag floor' }, 'пол') : null),
-        el('span', { class: 'when' }, 'когда ' + anchorText(h) + ' → ' + h.action)),
+          h.paused ? el('span', { class: 'tag' }, 'пауза') : h.auto ? el('span', { class: 'tag floor' }, 'на автомате') : null),
+        el('span', { class: 'when' }, 'когда ' + anchorText(h) + ' → ' + h.action),
+        h.floor ? el('span', { class: 'when' }, 'пол: ' + h.floor) : null),
       chevron());
   }
 
@@ -282,11 +284,10 @@ body.web.dirty #save { display: block; }
 
   function mainView() {
     const s = state.s;
-    const labels = active().filter(h => h.floor_label).map(h => h.floor_label);
     const full = active().length >= MAX_ACTIVE;
     return el('div', { class: 'view' },
-      el('div', { class: 'title' }, 'Настройки'),
-      el('p', { class: 'lead' }, 'Пол дня — минимум, который выполним даже в плохой день.'),
+      el('div', { class: 'title' }, 'Floor'),
+      el('p', { class: 'lead' }, 'У каждой привычки цель и пол — минимум, который выполним даже в плохой день.'),
 
       el('div', { class: 'head' }, el('span', {}, 'Привычки'), el('span', {}, active().length + ' из ' + MAX_ACTIVE)),
       el('div', { class: 'group' },
@@ -295,7 +296,7 @@ body.web.dirty #save { display: block; }
           el('span', { class: 'emoji' }, '+'), el('span', { class: 'label' }, 'Новая привычка'))),
       el('div', { class: 'foot' }, full
         ? 'Пять активных — предел. Чтобы добавить новую, поставь одну на паузу.'
-        : labels.length ? 'Вечером бот спросит: ' + labels.join(' · ') + '.' : 'Отметь в привычке «Входит в пол дня» — о ней бот спросит вечером.'),
+        : 'Вечером отмечаешь каждую: пол или цель. Пол дня взят, если все хотя бы на полу.'),
 
       el('div', { class: 'head' }, 'Подъём'),
       el('div', { class: 'group' },
@@ -314,8 +315,23 @@ body.web.dirty #save { display: block; }
       el('div', { class: 'head' }, 'Сообщения'),
       el('div', { class: 'group' },
         el('label', { class: 'row' }, el('span', { class: 'label' }, 'Вечерний вопрос'), timeInput('evening')),
-        el('label', { class: 'row' }, el('span', { class: 'label' }, 'Итог недели, воскресенье'), timeInput('weekly'))),
-      el('div', { class: 'foot' }, 'Утро приходит через 30 минут после подъёма по данным часов, но не позже ' + addMin(s.wake, 180) + '.'));
+        el('label', { class: 'row' }, el('span', { class: 'label' }, 'Итог недели, воскресенье'), timeInput('weekly')),
+        el('label', { class: 'row' }, el('span', { class: 'label' }, 'Итог недели ещё одному человеку'),
+          toggle(shareOn(), on => { state.share = on; changed(); render(); }))),
+      el('div', { class: 'foot' }, shareFoot() + ' Утро приходит через 30 минут после подъёма по данным часов, но не позже ' + addMin(s.wake, 180) + '.'));
+  }
+
+  const toggle = (checked, onchange) => el('span', { class: 'sw' },
+    el('input', { type: 'checkbox', checked, onchange: e => { haptic('sel'); onchange(e.target.checked, e.target); } }), el('i'));
+
+  // Получатель итога недели: включение — бот пришлёт ссылку, её отправляют человеку.
+  // watch '…' — ссылка отправлена, человек её ещё не открыл.
+  const shareOn = () => state.share ?? !!state.watch;
+  function shareFoot() {
+    if (state.watch === '…' && shareOn()) return 'Ссылка в чате с ботом — человек её ещё не открыл.';
+    if (state.watch && shareOn()) return 'Получает: ' + state.watch + '. Таблица и цифры, без якорей и текста Claude.';
+    if (shareOn()) return 'После сохранения бот пришлёт ссылку — отправь её тому, кто будет получать итог.';
+    return 'Один человек в курсе помогает держаться. Только по желанию.';
   }
 
   // ---------- привычка ----------
@@ -325,7 +341,7 @@ body.web.dirty #save { display: block; }
       alertMsg('Пять активных привычек — предел. Поставь одну на паузу, чтобы добавить новую.');
       return;
     }
-    state.h.push({ id: 'h' + Date.now().toString(36), emoji: '', title: '', anchor: '', action: '', since: '', isNew: true });
+    state.h.push({ id: 'h' + Date.now().toString(36), emoji: '', title: '', anchor: '', action: '', floor: '', since: '', isNew: true });
     go({ name: 'habit', i: state.h.length - 1 });
   }
 
@@ -337,9 +353,6 @@ body.web.dirty #save { display: block; }
       requestAnimationFrame(() => autosize(t));
       return t;
     };
-    const toggle = (checked, onchange) => el('span', { class: 'sw' },
-      el('input', { type: 'checkbox', checked, onchange: e => { haptic('sel'); onchange(e.target.checked, e.target); } }), el('i'));
-
     const whenArea = area('anchor', 'закрыл ноутбук');
     return el('div', { class: 'view' },
       el('div', { class: 'title' }, h.isNew ? 'Новая привычка' : h.title || 'Привычка'),
@@ -365,25 +378,26 @@ body.web.dirty #save { display: block; }
         ? '{wake} подставится как ' + state.s.wake + ' и поменяется вместе с будильником.'
         : 'Событие, а не намерение: «закрыл ноутбук», а не «вечером».'),
 
-      el('div', { class: 'head' }, 'Что делаю'),
-      el('div', { class: 'group' }, el('label', { class: 'field' }, area('action', 'куртка и 10 минут на улице'))),
-      el('div', { class: 'foot' }, 'Одно маленькое действие, выполнимое без желания.'),
+      el('div', { class: 'head' }, 'Цель'),
+      el('div', { class: 'group' }, el('label', { class: 'field' }, area('action', 'одеваюсь и 10 минут на улице'))),
+      el('div', { class: 'foot' }, 'Полная версия в обычный день.'),
+
+      el('div', { class: 'head' }, 'Пол'),
+      el('div', { class: 'group' }, el('label', { class: 'field' }, area('floor', 'выйти за дверь'))),
+      el('div', { class: 'foot' }, 'Минимум на плохой день — выполнимый без желания. После пропуска бот предложит именно его.'),
 
       el('div', { class: 'group', style: 'margin-top:24px' },
-        el('label', { class: 'row' }, el('span', { class: 'label' }, 'Входит в пол дня'),
-          toggle(!!h.floor_label, on => {
-            h.floor_label = on ? (h.title || 'привычка').toLowerCase() : '';
-            changed(); render();
+        el('label', { class: 'row' }, el('span', { class: 'label' }, 'На автомате'),
+          toggle(!!h.auto, (on, input) => {
+            if (!on && !h.paused && active().length >= MAX_ACTIVE) { input.checked = true; alertMsg('Уже пять активных привычек. Сначала выпусти или поставь на паузу другую.'); return; }
+            h.auto = on || undefined; changed(); render();
           })),
-        h.floor_label ? el('label', { class: 'field' },
-          el('span', { class: 'cap' }, 'Как спросить вечером'),
-          el('input', { value: h.floor_label, oninput: e => { h.floor_label = e.target.value; changed(); } })) : null,
         el('label', { class: 'row' }, el('span', { class: 'label' }, 'На паузе'),
           toggle(!!h.paused, (on, input) => {
-            if (!on && active().length >= MAX_ACTIVE) { input.checked = true; alertMsg('Уже пять активных привычек. Сначала поставь на паузу другую.'); return; }
+            if (!on && !h.auto && active().length >= MAX_ACTIVE) { input.checked = true; alertMsg('Уже пять активных привычек. Сначала поставь на паузу другую.'); return; }
             h.paused = on || undefined; changed(); render();
           }))),
-      el('div', { class: 'foot' }, 'Пауза убирает привычку отовсюду, но сохраняет её возраст.'),
+      el('div', { class: 'foot' }, 'На автомате — идёт сама: бот о ней больше не спрашивает, место освобождается. Пауза убирает отовсюду. Возраст сохраняется в обоих случаях.'),
 
       el('div', { class: 'group', style: 'margin-top:24px' },
         state.h.length > 1 ? el('button', { type: 'button', class: 'row link' + (i === 0 ? ' muted' : ''), onclick: () => move(i, -1) }, 'Выше в списке') : null,
@@ -406,17 +420,17 @@ body.web.dirty #save { display: block; }
     haptic('warning'); changed(); go({ name: 'main' });
   }
 
-  const incomplete = h => !h.title.trim() || !h.anchor.trim() || !h.action.trim();
+  const incomplete = h => !h.title.trim() || !h.anchor.trim() || !h.action.trim() || !(h.floor || '').trim();
 
   async function back() {
     if (view.name !== 'habit') return;
     const h = state.h[view.i];
     if (h && incomplete(h)) {
-      const empty = !h.title.trim() && !h.anchor.trim() && !h.action.trim();
+      const empty = !h.title.trim() && !h.anchor.trim() && !h.action.trim() && !(h.floor || '').trim();
       if (h.isNew && (empty || await confirmMsg('Привычка не заполнена. Выбросить её?'))) {
         state.h.splice(view.i, 1); changed();
       } else {
-        alertMsg('Заполни название, «когда» и «что делаю».');
+        alertMsg('Заполни название, «когда», цель и пол.');
         return;
       }
     }
@@ -426,23 +440,26 @@ body.web.dirty #save { display: block; }
   // ---------- сохранение ----------
 
   function payload() {
-    return {
+    const out = {
       v: state.v, rev: state.rev, s: { ...state.s },
       h: state.h.map(({ isNew, ...h }) => {
-        const out = { id: h.id, title: h.title.trim(), anchor: h.anchor.trim(), action: h.action.trim(), since: h.since || '' };
+        const out = { id: h.id, title: h.title.trim(), anchor: h.anchor.trim(), action: h.action.trim(),
+          floor: (h.floor || h.floor_label || '').trim(), since: h.since || '' };
         if (h.emoji) out.emoji = h.emoji;
-        if (h.floor_label && h.floor_label.trim()) out.floor_label = h.floor_label.trim();
         if (h.paused) out.paused = true;
+        if (h.auto) out.auto = true;
         return out;
       }),
     };
+    if (state.share != null && state.share !== !!state.watch) out.share = state.share;
+    return out;
   }
 
   const dirty = () => JSON.stringify(payload()) !== initial;
 
   function save() {
     const bad = state.h.findIndex(incomplete);
-    if (bad >= 0) { go({ name: 'habit', i: bad }); alertMsg('Заполни название, «когда» и «что делаю».'); return; }
+    if (bad >= 0) { go({ name: 'habit', i: bad }); alertMsg('Заполни название, «когда», цель и пол.'); return; }
     if (!active().length) { alertMsg('Нужна хотя бы одна активная привычка.'); return; }
     const data = JSON.stringify(payload());
     if (new TextEncoder().encode(data).length > LIMIT) { alertMsg('Слишком много текста — сократи формулировки.'); return; }
@@ -466,9 +483,14 @@ body.web.dirty #save { display: block; }
       });
       const res = await r.json();
       if (res.ok) {
+        // Окно остаётся открытым: новая версия позволяет править дальше.
         haptic('success');
-        if (tg.isVersionAtLeast('6.2')) tg.disableClosingConfirmation();
-        tg.close(); // итог бот уже написал в чат
+        state.rev = res.rev || state.rev;
+        state.h.forEach(h => { delete h.isNew; if (!h.since) h.since = new Date().toISOString().slice(0, 10); });
+        if (state.share != null) { state.watch = state.share ? (state.watch || '…') : ''; state.share = null; }
+        initial = JSON.stringify(payload());
+        changed(); render();
+        toast('✅ Сохранено');
         return;
       }
       haptic('error');

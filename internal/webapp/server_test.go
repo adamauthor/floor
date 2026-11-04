@@ -67,9 +67,9 @@ func TestServer(t *testing.T) {
 	var saved []string
 	srv := &Server{
 		Token: token, Owner: 42, Origin: "https://pages.test",
-		Save: func(_ context.Context, data string) (string, bool) {
+		Save: func(_ context.Context, data string) SaveResult {
 			saved = append(saved, data)
-			return "✅ Сохранено", true
+			return SaveResult{OK: true, Text: "✅ Сохранено", Rev: "r2"}
 		},
 		Log: slog.New(slog.NewTextHandler(io.Discard, nil)),
 		Now: func() time.Time { return now },
@@ -103,8 +103,8 @@ func TestServer(t *testing.T) {
 		t.Fatal("сохранено без проверки")
 	}
 	w := do(http.MethodPost, "/settings", body(sign(42, now)))
-	var resp saveResponse
-	if err := json.NewDecoder(w.Body).Decode(&resp); err != nil || !resp.OK || resp.Text != "✅ Сохранено" {
+	var resp SaveResult
+	if err := json.NewDecoder(w.Body).Decode(&resp); err != nil || !resp.OK || resp.Text != "✅ Сохранено" || resp.Rev != "r2" {
 		t.Fatalf("ответ: %d %+v %v", w.Code, resp, err)
 	}
 	if len(saved) != 1 || saved[0] != `{"v":1}` {

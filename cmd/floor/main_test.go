@@ -49,6 +49,7 @@ func TestEndToEnd(t *testing.T) {
 	t.Setenv("DB_PATH", dbPath)
 	t.Setenv("CLAUDE_BIN", claude)
 	t.Setenv("LOG_LEVEL", "error")
+	t.Setenv("WEBAPP_ADDR", "")
 
 	ctx, cancel := context.WithCancel(context.Background())
 	done := make(chan error, 1)
@@ -94,6 +95,8 @@ func TestEndToEnd(t *testing.T) {
 		t.Errorf("правка: %v", edits[0].Params)
 	}
 
+	// Выгрузка пишется своим воркером: дождаться её, прежде чем гасить процесс.
+	waitDB(t, dbPath, "2026-10-31")
 	cancel()
 	select {
 	case err := <-done:
@@ -121,6 +124,21 @@ func TestEndToEnd(t *testing.T) {
 	if marked.FloorStatus != "yes" {
 		t.Errorf("отметка: %+v", marked)
 	}
+}
+
+func waitDB(t *testing.T, path, date string) {
+	t.Helper()
+	db, err := store.Open(context.Background(), path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	for deadline := time.Now().Add(10 * time.Second); time.Now().Before(deadline); time.Sleep(20 * time.Millisecond) {
+		if d, err := db.GetDay(context.Background(), date); err == nil && d.WakeAt != nil {
+			return
+		}
+	}
+	t.Fatal("выгрузка не записалась")
 }
 
 func TestDispatchCommands(t *testing.T) {

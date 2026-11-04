@@ -77,18 +77,24 @@ func TestSettingsSavedFromWebApp(t *testing.T) {
 	data := h.submit(t, func(st *webapp.State) {
 		st.Settings.WakeAnchor = "09:30"
 		st.Settings.StepsFloor = 5000
-		st.Habits = append(st.Habits, habits.Habit{ID: "read", Emoji: "📖", Title: "Чтение", Anchor: "лёг", Action: "страница книги"})
+		st.Habits = append(st.Habits, habits.Habit{ID: "read", Emoji: "📖", Title: "Чтение", Anchor: "лёг", Action: "страница книги", Floor: "открыть книгу"})
 	})
-	reply, ok := h.app.SaveSettings(ctx, data)
-	if !ok || h.lastText(t) != reply {
-		t.Fatalf("ответ %q, ok=%v", reply, ok)
+	res := h.app.SaveSettings(ctx, data)
+	reply := res.Text
+	if !res.OK || h.lastText(t) != reply || res.Rev == "" {
+		t.Fatalf("ответ %+v", res)
+	}
+	// Новая версия годится для следующей правки без перезапуска страницы.
+	again2 := h.submit(t, func(st *webapp.State) { st.Rev = res.Rev; st.Settings.StepsGoal = 12000 })
+	if !h.app.SaveSettings(ctx, again2).OK {
+		t.Error("вторая правка с новой версией не прошла")
 	}
 	for _, want := range []string{"✅ Сохранено", "подъём 07:00 → 09:30", "пол 5000", "новая привычка «Чтение»"} {
 		if !strings.Contains(reply, want) {
 			t.Errorf("нет %q в %q", want, reply)
 		}
 	}
-	if c := h.app.conf(); c.WakeAnchor != (config.Clock{Hour: 9, Minute: 30}) || c.StepsFloor != 5000 {
+	if c := h.app.conf(); c.WakeAnchor != (config.Clock{Hour: 9, Minute: 30}) || c.StepsFloor != 5000 || c.StepsGoal != 12000 {
 		t.Errorf("конфигурация не обновилась: %+v", c.Settings())
 	}
 	_, f, err := habits.Load(h.app.Cfg.HabitsFile, "2026-11-04")
@@ -166,7 +172,7 @@ func TestInvalidSettingsRejected(t *testing.T) {
 		"без якоря":       func(st *webapp.State) { st.Habits[0].Anchor = "  " },
 		"шесть привычек": func(st *webapp.State) {
 			for i := range 2 {
-				st.Habits = append(st.Habits, habits.Habit{ID: "x" + string(rune('a'+i)), Title: "x", Anchor: "x", Action: "x"})
+				st.Habits = append(st.Habits, habits.Habit{ID: "x" + string(rune('a'+i)), Title: "x", Anchor: "x", Action: "x", Floor: "x"})
 			}
 		},
 	} {

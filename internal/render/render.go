@@ -144,14 +144,6 @@ func Morning(d MorningData, r Rules) string {
 	return fmt.Sprintf("☀️ %s\n\n%s\n\n%s", DateTitle(d.Date), body, html.EscapeString(d.Step))
 }
 
-// Evening — вечерний вопрос про пол.
-func Evening(labels []string) string {
-	if len(labels) == 0 {
-		return "🌙 Пол на сегодня"
-	}
-	return "🌙 Пол на сегодня: " + html.EscapeString(strings.Join(labels, " · "))
-}
-
 // FloorReply — чем заменяется вечернее сообщение после нажатия.
 func FloorReply(status string, twoInARow bool) string {
 	if status == metrics.StatusYes {
@@ -181,7 +173,7 @@ func cell(s string) string {
 	return s + strings.Repeat(" ", width-len([]rune(s)))
 }
 
-func weekTable(days []metrics.Day, today string, r Rules) string {
+func weekTable(days []metrics.Day, today string, r Rules, hs []habits.Habit, marks map[string]map[string]int) string {
 	wake := "Подъём  "
 	steps := "Шаги    "
 	floor := "Пол     "
@@ -212,6 +204,7 @@ func weekTable(days []metrics.Day, today string, r Rules) string {
 		}
 	}
 	lines := []string{"        Пн  Вт  Ср  Чт  Пт  Сб  Вс", wake, steps, floor}
+	lines = append(lines, habitRows(days, today, hs, marks)...)
 	for i, l := range lines {
 		lines[i] = strings.TrimRight(l, " ")
 	}
@@ -224,8 +217,11 @@ type WeeklyData struct {
 	Today   string
 	Days    []metrics.Day // семь дней с понедельника
 	Habits  []habits.Habit
-	Wake    string // якорь подъёма, HH:MM
-	Summary string // три строки от Claude или WeeklyFallback
+	Wake    string                    // якорь подъёма, HH:MM
+	Summary string                    // три строки от Claude или WeeklyFallback
+	Marks   map[string]map[string]int // дата → id привычки → уровень
+	Returns int                       // возвращений после пропуска за неделю
+	SRI     *int                      // регулярность сна; nil — мало данных
 }
 
 // Weekly — недельная сводка: таблица, регулярность, якоря, три строки.
@@ -234,14 +230,20 @@ func Weekly(d WeeklyData, r Rules) string {
 	var b strings.Builder
 	b.WriteString(weekTitle(d.Monday))
 	b.WriteString("\n\n<pre>")
-	b.WriteString(weekTable(d.Days, d.Today, r))
+	b.WriteString(weekTable(d.Days, d.Today, r, d.Habits, d.Marks))
 	b.WriteString("</pre>\n\n")
 	fmt.Fprintf(&b, "Подъём в норме: %d из %d", s.WakeInNorm, len(d.Days))
 	if s.WakeKnown > 1 {
 		fmt.Fprintf(&b, ", разброс %s", Duration(s.SpreadMin))
 	}
-	fmt.Fprintf(&b, "\nШаги: пол взят %d из %d\n\n", s.StepsFloor, s.StepsKnown)
-	b.WriteString("Якоря на неделю:\n")
+	if d.SRI != nil {
+		fmt.Fprintf(&b, "\nРегулярность сна: %d из 100", *d.SRI)
+	}
+	fmt.Fprintf(&b, "\nШаги: пол взят %d из %d", s.StepsFloor, s.StepsKnown)
+	if d.Returns > 0 {
+		fmt.Fprintf(&b, "\nВернулся после пропуска: %s", times(d.Returns))
+	}
+	b.WriteString("\n\nЯкоря на неделю:\n")
 	for _, h := range d.Habits {
 		fmt.Fprintf(&b, "%s\n", anchorLine(h, d.Wake))
 	}
@@ -261,24 +263,46 @@ func weekLabel(week int) string {
 	return fmt.Sprintf("неделя %d", week)
 }
 
-// HabitCard — закреплённое сообщение: что развиваю и что это запускает.
-func HabitCard(active []habits.Habit, floorLabels []string, today, wake string) string {
+// HabitCard — закреплённое сообщение: что развиваю, что это запускает и какой минимум.
+func HabitCard(f habits.File, today, wake string) string {
 	var b strings.Builder
 	b.WriteString("📌 <b>Привычки и якоря</b>\n")
-	for _, h := range active {
-		title := html.EscapeString(h.Title)
-		if h.Emoji != "" {
-			title = html.EscapeString(h.Emoji) + " <b>" + title + "</b>"
-		} else {
-			title = "<b>" + title + "</b>"
+	for _, h := range f.Active() {
+		fmt.Fprintf(&b, "\n%s · %s\n%s\nпол: %s\n", habitTitle(h, true), weekLabel(h.Week(today)),
+			anchorLine(h, wake), html.EscapeString(h.Floor))
+	}
+	if auto := f.Automatic(); len(auto) > 0 {
+		names := make([]string, len(auto))
+		for i, h := range auto {
+			names[i] = habitTitle(h, false)
 		}
-		fmt.Fprintf(&b, "\n%s · %s\n%s\n", title, weekLabel(h.Week(today)), anchorLine(h, wake))
+		fmt.Fprintf(&b, "\nНа автомате: %s\n", strings.Join(names, " · "))
 	}
-	if len(floorLabels) > 0 {
-		fmt.Fprintf(&b, "\nПол дня: %s", html.EscapeString(strings.Join(floorLabels, " · ")))
-	}
-	b.WriteString("\nПропуск не обнуляет. Не пропускай дважды.")
+	b.WriteString("\nПол — минимум на плохой день. Пропуск не обнуляет. Не пропускай дважды.")
 	return b.String()
+}
+
+// habitTitle — «🦷 Зубы», с жирным названием или без.
+func habitTitle(h habits.Habit, bold bool) string {
+	title := html.EscapeString(h.Title)
+	if bold {
+		title = "<b>" + title + "</b>"
+	}
+	if h.Emoji != "" {
+		return html.EscapeString(h.Emoji) + " " + title
+	}
+	return title
+}
+
+// times — «1 раз», «3 раза», «5 раз».
+func times(n int) string {
+	switch {
+	case n%10 == 1 && n%100 != 11:
+		return fmt.Sprintf("%d раз", n)
+	case n%10 >= 2 && n%10 <= 4 && (n%100 < 12 || n%100 > 14):
+		return fmt.Sprintf("%d раза", n)
+	}
+	return fmt.Sprintf("%d раз", n)
 }
 
 // StripTags убирает разметку Telegram для вывода в терминал.
@@ -288,10 +312,10 @@ func StripTags(s string) string {
 }
 
 // ContextTable — компактная таблица дней для промпта:
-// дата | подъём | Δ мин | сон | шаги | пол.
-func ContextTable(days []metrics.Day) string {
+// дата | подъём | Δ мин | сон | шаги | пол дня | привычки.
+func ContextTable(days []metrics.Day, hs []habits.Habit, marks map[string]map[string]int) string {
 	var b strings.Builder
-	b.WriteString("дата | подъём | Δ мин | сон | шаги | пол\n")
+	b.WriteString("дата | подъём | Δ мин | сон | шаги | пол дня | привычки\n")
 	for _, d := range days {
 		wake, delta, sleep, steps := "-", "-", "-", "-"
 		if d.WakeAt != nil {
@@ -310,7 +334,17 @@ func ContextTable(days []metrics.Day) string {
 		if status == "" {
 			status = metrics.StatusNone
 		}
-		fmt.Fprintf(&b, "%s | %s | %s | %s | %s | %s\n", d.Date, wake, delta, sleep, steps, status)
+		var hm []string
+		for _, h := range hs {
+			if level, ok := marks[d.Date][h.ID]; ok {
+				hm = append(hm, h.Title+": "+[...]string{"мимо", "пол", "цель"}[min(max(level, 0), 2)])
+			}
+		}
+		marked := "-"
+		if len(hm) > 0 {
+			marked = strings.Join(hm, ", ")
+		}
+		fmt.Fprintf(&b, "%s | %s | %s | %s | %s | %s | %s\n", d.Date, wake, delta, sleep, steps, status, marked)
 	}
 	return b.String()
 }
@@ -319,7 +353,7 @@ func ContextTable(days []metrics.Day) string {
 func HabitsContext(active []habits.Habit, today, wake string) string {
 	var b strings.Builder
 	for _, h := range active {
-		fmt.Fprintf(&b, "%s | когда %s → %s | неделя %d\n", h.Title, h.AnchorText(wake), h.Action, h.Week(today))
+		fmt.Fprintf(&b, "%s | когда %s → %s | пол: %s | неделя %d\n", h.Title, h.AnchorText(wake), h.Action, h.Floor, h.Week(today))
 	}
 	return b.String()
 }
