@@ -224,8 +224,31 @@ var googleStages = map[string]string{
 }
 
 type googleInterval struct {
-	StartTime string `json:"startTime"`
-	EndTime   string `json:"endTime"`
+	StartTime      string `json:"startTime"`
+	EndTime        string `json:"endTime"`
+	StartUTCOffset string `json:"startUtcOffset"`
+	EndUTCOffset   string `json:"endUtcOffset"`
+}
+
+// local переводит интервал из UTC в местное время по смещениям из самого ответа
+// (вид "18000s"); без смещения — в пояс по умолчанию. Метрики считают подъём
+// по часам времени, поэтому UTC здесь дал бы подъём в 23:21 вместо 04:21.
+func (iv googleInterval) local(def *time.Location) (string, string, bool) {
+	start, err1 := time.Parse(time.RFC3339Nano, iv.StartTime)
+	end, err2 := time.Parse(time.RFC3339Nano, iv.EndTime)
+	if err1 != nil || err2 != nil {
+		return "", "", false
+	}
+	return start.In(offsetZone(iv.StartUTCOffset, def)).Format(time.RFC3339),
+		end.In(offsetZone(iv.EndUTCOffset, def)).Format(time.RFC3339), true
+}
+
+func offsetZone(offset string, def *time.Location) *time.Location {
+	d, err := time.ParseDuration(offset)
+	if err != nil || offset == "" {
+		return def
+	}
+	return time.FixedZone("", int(d.Seconds()))
 }
 
 // sleep — сегменты сна для сессий, закончившихся с даты since.
@@ -255,12 +278,18 @@ func (s *GoogleSource) sleep(ctx context.Context, since time.Time) ([]googleSlee
 				continue
 			}
 			if len(p.Sleep.Stages) == 0 {
-				out = append(out, googleSleep{p.Sleep.Interval.StartTime, p.Sleep.Interval.EndTime, ValueAsleep})
+				if start, end, ok := p.Sleep.Interval.local(s.Loc); ok {
+					out = append(out, googleSleep{start, end, ValueAsleep})
+				}
 				continue
 			}
 			for _, st := range p.Sleep.Stages {
-				if v, ok := googleStages[st.Type]; ok {
-					out = append(out, googleSleep{st.StartTime, st.EndTime, v})
+				v, ok := googleStages[st.Type]
+				if !ok {
+					continue
+				}
+				if start, end, ok := st.local(s.Loc); ok {
+					out = append(out, googleSleep{start, end, v})
 				}
 			}
 		}

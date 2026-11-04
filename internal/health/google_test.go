@@ -26,7 +26,7 @@ const googleStepsResp = `{"rollupDataPoints":[
 const googleSleepResp = `{"dataPoints":[
  {"sleep":{"interval":{"startTime":"2026-11-03T18:10:00Z","endTime":"2026-11-04T01:40:00Z"},
   "stages":[
-   {"startTime":"2026-11-03T18:10:00Z","endTime":"2026-11-03T21:00:00Z","type":"LIGHT"},
+   {"startTime":"2026-11-03T18:10:00Z","endTime":"2026-11-03T21:00:00Z","startUtcOffset":"18000s","endUtcOffset":"18000s","type":"LIGHT"},
    {"startTime":"2026-11-03T21:00:00Z","endTime":"2026-11-03T21:20:00Z","type":"AWAKE"},
    {"startTime":"2026-11-03T21:20:00Z","endTime":"2026-11-03T23:00:00Z","type":"DEEP"},
    {"startTime":"2026-11-03T23:00:00Z","endTime":"2026-11-04T01:40:00Z","type":"REM"}]}},
@@ -94,6 +94,13 @@ func TestGoogleFetch(t *testing.T) {
 	}
 	if got := strings.Join(values, ","); got != "core,awake,deep,rem,asleep" {
 		t.Errorf("стадии = %s", got)
+	}
+	// Время переводится в местное: по смещению из ответа, иначе в пояс по умолчанию.
+	if got := exp.Sleep[0].Start.Format(time.RFC3339); got != "2026-11-03T23:10:00+05:00" {
+		t.Errorf("начало сна = %s", got)
+	}
+	if got := exp.Sleep[3].End.Format(time.RFC3339); got != "2026-11-04T06:40:00+05:00" {
+		t.Errorf("конец сна = %s", got)
 	}
 
 	var body struct {
