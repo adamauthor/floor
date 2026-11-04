@@ -23,7 +23,7 @@
 
 В режиме **Testing** Google отзывает доступ каждые 7 дней. Чтобы этого не было, на странице **Audience** нажми **Publish app** (статус **In production**).
 
-Для публикации Branding требует ссылки. Они лежат в ветке `gh-pages` этого репозитория:
+Для публикации Branding требует ссылки. Это страницы `docs/index.html`, `docs/privacy/`, `docs/terms/`: GitHub Pages раздаёт папку `docs/` из `main`.
 
 - Application home page: `https://adamauthor.github.io/floor/`
 - Privacy policy: `https://adamauthor.github.io/floor/privacy/`
