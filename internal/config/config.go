@@ -28,10 +28,15 @@ type Config struct {
 
 	HabitsFile string
 
-	HealthSource string // "file" | "http"
+	HealthSource string // "file" | "http" | "google"
 	HealthFile   string
 	HTTPAddr     string
 	IngestToken  string
+
+	GoogleClientID     string
+	GoogleClientSecret string
+	GoogleTokenFile    string
+	GooglePoll         time.Duration
 
 	DBPath            string
 	ClaudeBin         string
@@ -98,6 +103,11 @@ func LoadLocal() (Config, error) {
 		HTTPAddr:     r.str("HTTP_ADDR", ":8080"),
 		IngestToken:  r.str("INGEST_TOKEN", ""),
 
+		GoogleClientID:     r.str("GOOGLE_CLIENT_ID", ""),
+		GoogleClientSecret: r.str("GOOGLE_CLIENT_SECRET", ""),
+		GoogleTokenFile:    expandHome(r.str("GOOGLE_TOKEN_FILE", "~/.floor/google-token.json")),
+		GooglePoll:         r.duration("GOOGLE_POLL", 15*time.Minute),
+
 		DBPath:            expandHome(r.str("DB_PATH", "~/.floor/floor.db")),
 		ClaudeBin:         r.str("CLAUDE_BIN", "claude"),
 		LLMTimeout:        r.duration("LLM_TIMEOUT", 90*time.Second),
@@ -107,8 +117,15 @@ func LoadLocal() (Config, error) {
 
 	switch c.HealthSource {
 	case "file", "http":
+	case "google":
+		if c.GoogleClientID == "" || c.GoogleClientSecret == "" {
+			errs = append(errs, errors.New("GOOGLE_CLIENT_ID и GOOGLE_CLIENT_SECRET обязательны при HEALTH_SOURCE=google"))
+		}
+		if c.GooglePoll < time.Minute {
+			errs = append(errs, errors.New("GOOGLE_POLL: не чаще раза в минуту"))
+		}
 	default:
-		errs = append(errs, fmt.Errorf("HEALTH_SOURCE: ожидается file или http, получено %q", c.HealthSource))
+		errs = append(errs, fmt.Errorf("HEALTH_SOURCE: ожидается file, http или google, получено %q", c.HealthSource))
 	}
 	if c.StepsFloor > c.StepsGoal {
 		errs = append(errs, errors.New("STEPS_FLOOR не может быть больше STEPS_GOAL"))

@@ -31,6 +31,7 @@ const usage = `floor — бот «пола»
   floor                    запустить бота
   floor debug-day [дата]   метрики дня из базы (YYYY-MM-DD, по умолчанию сегодня)
   floor habits             привычки и якоря, проверка habits.json
+  floor google-auth        войти в Google Health (для HEALTH_SOURCE=google)
   floor version            версия`
 
 func main() {
@@ -51,6 +52,8 @@ func dispatch(ctx context.Context, args []string) error {
 		return debugDay(ctx, args[1:])
 	case "habits":
 		return showHabits()
+	case "google-auth":
+		return googleAuth(ctx)
 	case "version":
 		fmt.Println(version)
 		return nil
@@ -91,7 +94,7 @@ func run(ctx context.Context) error {
 		LLM: &llm.ClaudeCLI{Bin: cfg.ClaudeBin, Timeout: cfg.LLMTimeout, RetryDelay: 5 * time.Second, Log: log},
 	}
 
-	src := source(cfg, log)
+	src := source(ctx, cfg, log, tg)
 	var wg sync.WaitGroup
 	start := func(name string, fn func(context.Context) error) {
 		wg.Add(1)
@@ -115,11 +118,31 @@ func run(ctx context.Context) error {
 	return nil
 }
 
-func source(cfg config.Config, log *slog.Logger) health.Source {
-	if cfg.HealthSource == "http" {
+func source(ctx context.Context, cfg config.Config, log *slog.Logger, tg core.Messenger) health.Source {
+	switch cfg.HealthSource {
+	case "http":
 		return &health.HTTPSource{Addr: cfg.HTTPAddr, Token: cfg.IngestToken, Log: log}
+	case "google":
+		src := googleSource(ctx, cfg, log)
+		src.Alert = func(ctx context.Context, err error) {
+			text := "Не могу забрать шаги и сон из Google Health. Запусти на Маке в папке floor:\nmake google-auth"
+			if _, err := tg.Send(ctx, text, nil); err != nil {
+				log.Warn("google_alert_failed", "error", err)
+			}
+		}
+		return src
 	}
 	return &health.FileSource{Path: cfg.HealthFile, Log: log}
+}
+
+func googleSource(ctx context.Context, cfg config.Config, log *slog.Logger) *health.GoogleSource {
+	conf := health.GoogleOAuth(cfg.GoogleClientID, cfg.GoogleClientSecret)
+	return &health.GoogleSource{
+		Client:   health.GoogleClient(ctx, conf, cfg.GoogleTokenFile),
+		Loc:      cfg.DefaultTZ,
+		Interval: cfg.GooglePoll,
+		Log:      log,
+	}
 }
 
 func consume(ctx context.Context, src health.Source, app *core.App, log *slog.Logger) error {
@@ -163,7 +186,7 @@ func safely(ctx context.Context, fn func(context.Context) error) (err error) {
 	return errors.New("завершилась без ошибки")
 }
 
-// debugDay печатает метрики дня, предварительно подтянув файл выгрузки, если он есть.
+// debugDay печатает метрики дня, предварительно подтянув свежие данные, если они доступны.
 func debugDay(ctx context.Context, args []string) error {
 	cfg, err := config.LoadLocal()
 	if err != nil {
@@ -177,7 +200,15 @@ func debugDay(ctx context.Context, args []string) error {
 	defer db.Close()
 	app := &core.App{Cfg: cfg, Store: db, Log: log, Now: time.Now}
 
-	if cfg.HealthSource == "file" {
+	switch cfg.HealthSource {
+	case "google":
+		exp, err := googleSource(ctx, cfg, log).Fetch(ctx)
+		if err != nil {
+			log.Warn("google_fetch_failed", "error", err)
+		} else if err := app.Apply(ctx, exp); err != nil {
+			return err
+		}
+	case "file":
 		if raw, err := os.ReadFile(cfg.HealthFile); err == nil {
 			exp, err := health.Parse(raw)
 			if err != nil {

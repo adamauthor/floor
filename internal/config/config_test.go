@@ -60,6 +60,7 @@ func TestLoadValidates(t *testing.T) {
 		{"источник", "HEALTH_SOURCE", "ftp"},
 		{"owner", "TELEGRAM_OWNER_ID", "abc"},
 		{"http без токена", "HEALTH_SOURCE", "http"},
+		{"google без клиента", "HEALTH_SOURCE", "google"},
 		{"пол выше цели", "STEPS_FLOOR", "20000"},
 	}
 	for _, tt := range tests {
