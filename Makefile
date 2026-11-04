@@ -40,6 +40,8 @@ install-launchd: build ## Поставить фоновым сервисом н�
 	cp .env $(FLOOR_DIR)/.env && chmod 600 $(FLOOR_DIR)/.env
 	sed "s|__HOME__|$(HOME)|g" deploy/launchd/$(PLIST) > $(HOME)/Library/LaunchAgents/$(PLIST)
 	launchctl bootout gui/$$(id -u)/com.floor.bot 2>/dev/null || true
+	@# bootout асинхронный: bootstrap до выгрузки падает с ошибкой 5.
+	@for i in 1 2 3 4 5 6 7 8 9 10; do launchctl print gui/$$(id -u)/com.floor.bot >/dev/null 2>&1 || break; sleep 1; done
 	launchctl bootstrap gui/$$(id -u) $(HOME)/Library/LaunchAgents/$(PLIST)
 	@echo "Floor запущен. Логи: make logs"
 
@@ -52,6 +54,8 @@ install-tunnel: ## Туннель ngrok, чтобы кнопка меню мог
 	mkdir -p $(FLOOR_DIR)/logs
 	sed "s|__HOME__|$(HOME)|g" deploy/launchd/com.floor.tunnel.plist > $(HOME)/Library/LaunchAgents/com.floor.tunnel.plist
 	launchctl bootout gui/$$(id -u)/com.floor.tunnel 2>/dev/null || true
+	@# bootout асинхронный: bootstrap до выгрузки падает с ошибкой 5.
+	@for i in 1 2 3 4 5 6 7 8 9 10; do launchctl print gui/$$(id -u)/com.floor.tunnel >/dev/null 2>&1 || break; sleep 1; done
 	launchctl bootstrap gui/$$(id -u) $(HOME)/Library/LaunchAgents/com.floor.tunnel.plist
 	@echo "Туннель запущен. Бот сам подхватит адрес за минуту."
 
