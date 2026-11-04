@@ -137,7 +137,8 @@ body.web.dirty #save { display: block; }
 (() => {
   'use strict';
   const tg = window.Telegram && window.Telegram.WebApp;
-  const inTG = !!(tg && tg.initData);
+  // С кнопки под полем ввода initData приходит пустым, а платформу клиент передаёт всегда.
+  const inTG = !!(tg && tg.platform && tg.platform !== 'unknown');
   const MAX_ACTIVE = 5;
   const LIMIT = 4096; // предел sendData
   const app = document.getElementById('app');
