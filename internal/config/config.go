@@ -28,6 +28,8 @@ type Config struct {
 
 	HabitsFile string
 	WebAppURL  string // страница настроек (Telegram Mini App)
+	WebAppAddr string // где бот принимает сохранение страницы; пусто — не принимает
+	NgrokAPI   string // локальный API ngrok, у которого бот узнаёт публичный адрес
 
 	HealthSource string // "file" | "http" | "google"
 	HealthFile   string
@@ -99,6 +101,8 @@ func LoadLocal() (Config, error) {
 
 		HabitsFile: expandHome(r.str("HABITS_FILE", "~/.floor/habits.json")),
 		WebAppURL:  r.str("WEBAPP_URL", "https://adamauthor.github.io/floor/app/"),
+		WebAppAddr: r.str("WEBAPP_ADDR", "127.0.0.1:8791"),
+		NgrokAPI:   r.str("NGROK_API", "http://127.0.0.1:4040"),
 
 		HealthSource: r.str("HEALTH_SOURCE", "file"),
 		HealthFile:   expandHome(r.str("HEALTH_FILE", "~/Library/Mobile Documents/com~apple~CloudDocs/Floor/health.json")),

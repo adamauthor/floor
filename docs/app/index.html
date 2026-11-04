@@ -447,9 +447,43 @@ body.web.dirty #save { display: block; }
     const data = JSON.stringify(payload());
     if (new TextEncoder().encode(data).length > LIMIT) { alertMsg('Слишком много текста — сократи формулировки.'); return; }
     if (!inTG) { toast('Это предпросмотр: сохранить можно только из Telegram.'); return; }
-    haptic('success');
-    tg.sendData(data); // Telegram закроет окно, бот ответит в чате
+    if (tg.initData && state.api) { post(data); return; }
+    // Без подписи окно открыто старой кнопкой под полем ввода: ей доступен только sendData.
+    if (!tg.initData) { haptic('success'); tg.sendData(data); return; }
+    alertMsg('Сейчас не сохранить: Мак спит или туннель не поднят. Попробуй позже.');
   }
+
+  // Из кнопки меню sendData недоступен: настройки уходят боту через туннель.
+  let saving = false;
+  async function post(data) {
+    if (saving) return;
+    saving = true;
+    tg.MainButton.showProgress(false);
+    try {
+      const r = await fetch(state.api.replace(/\/+$/, '') + '/settings', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ init: tg.initData, data }),
+      });
+      const res = await r.json();
+      if (res.ok) {
+        haptic('success');
+        if (tg.isVersionAtLeast('6.2')) tg.disableClosingConfirmation();
+        tg.close(); // итог бот уже написал в чат
+        return;
+      }
+      haptic('error');
+      alertMsg(plain(res.text || 'Не сохранил.'));
+    } catch (e) {
+      haptic('error');
+      alertMsg('Не достучался до бота: Мак спит или туннель не поднят. Попробуй позже.');
+    } finally {
+      saving = false;
+      tg.MainButton.hideProgress();
+    }
+  }
+
+  // Бот отвечает HTML для Telegram, а здесь нужен простой текст.
+  const plain = html => new DOMParser().parseFromString(html, 'text/html').body.textContent;
 
   function changed() {
     const d = dirty();
@@ -501,7 +535,7 @@ body.web.dirty #save { display: block; }
       empty('Не открылось', 'Не удалось прочитать настройки. Нажми «⚙️ Настройки» в чате ещё раз или обнови Telegram.');
       return;
     }
-    if (!st) { empty('Настройки Floor', 'Открой их из бота: кнопка «⚙️ Настройки» под полем ввода.'); return; }
+    if (!st) { empty('Настройки Floor', 'Открой их из бота: кнопка «⚙️ Настройки» слева от поля ввода.'); return; }
     if (st.v !== 1) { empty('Нужна свежая версия', 'Отправь боту /settings — придёт новая кнопка.'); return; }
     state = structuredClone(st);
     state.h = state.h || [];

@@ -39,8 +39,10 @@ type Messenger interface {
 	Edit(ctx context.Context, msgID int, text string) error
 	Pin(ctx context.Context, msgID int) error
 	Typing(ctx context.Context) error
-	// SendWebApp отправляет сообщение и ставит под полем ввода кнопку страницы настроек.
-	SendWebApp(ctx context.Context, text, label, url string) (int, error)
+	// SetMenuApp ставит кнопку меню слева от поля ввода, открывающую страницу настроек.
+	SetMenuApp(ctx context.Context, label, url string) error
+	// RemoveKeyboard отправляет сообщение и убирает кнопки под полем ввода.
+	RemoveKeyboard(ctx context.Context, text string) error
 }
 
 const (
@@ -65,6 +67,8 @@ type App struct {
 	TG    Messenger
 	Log   *slog.Logger
 	Now   func() time.Time
+	// API — публичный адрес, куда страница шлёт сохранение; nil или ошибка — туннеля нет.
+	API func(ctx context.Context) (string, error)
 
 	tickMu   sync.Mutex // один тик за раз: /start и расписание не должны отправить дважды
 	cfgMu    sync.RWMutex

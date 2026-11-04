@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"net/http"
 	"os"
 	"os/signal"
 	"runtime/debug"
@@ -22,6 +23,7 @@ import (
 	"floor/internal/render"
 	"floor/internal/schedule"
 	"floor/internal/store"
+	"floor/internal/webapp"
 )
 
 var version = "dev"
@@ -93,6 +95,10 @@ func run(ctx context.Context) error {
 		Cfg: cfg, Store: db, TG: tg, Log: log, Now: time.Now,
 		LLM: &llm.ClaudeCLI{Bin: cfg.ClaudeBin, Timeout: cfg.LLMTimeout, RetryDelay: 5 * time.Second, Log: log},
 	}
+	if cfg.WebAppAddr != "" {
+		tunnel := webapp.Tunnel{API: cfg.NgrokAPI, Local: cfg.WebAppAddr}
+		app.API = tunnel.PublicURL
+	}
 	if err := app.LoadSettings(ctx); err != nil {
 		return err
 	}
@@ -116,6 +122,13 @@ func run(ctx context.Context) error {
 		tg.Start(ctx, app)
 		return nil
 	})
+	if cfg.WebAppAddr != "" {
+		srv := &webapp.Server{
+			Token: cfg.TelegramToken, Owner: cfg.TelegramOwnerID, Origin: webapp.Origin(cfg.WebAppURL),
+			Save: app.SaveSettings, Log: log, Now: time.Now,
+		}
+		start("webapp", func(ctx context.Context) error { return serve(ctx, cfg.WebAppAddr, srv) })
+	}
 	start("schedule", func(ctx context.Context) error {
 		schedule.Run(ctx, time.Minute, app.Tick)
 		return nil
@@ -123,6 +136,21 @@ func run(ctx context.Context) error {
 
 	wg.Wait()
 	log.Info("stop")
+	return nil
+}
+
+// serve держит HTTP-сервер до отмены ctx.
+func serve(ctx context.Context, addr string, h http.Handler) error {
+	srv := &http.Server{Addr: addr, Handler: h, ReadHeaderTimeout: 10 * time.Second}
+	go func() {
+		<-ctx.Done()
+		shutdown, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		_ = srv.Shutdown(shutdown)
+	}()
+	if err := srv.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
+		return err
+	}
 	return nil
 }
 

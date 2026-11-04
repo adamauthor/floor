@@ -272,17 +272,26 @@ func TestSettingsRouting(t *testing.T) {
 	}
 }
 
-func TestSendWebAppAndSetup(t *testing.T) {
+func TestMenuAppAndSetup(t *testing.T) {
 	b, srv, _, _ := setup(t)
 	ctx := context.Background()
-	if _, err := b.SendWebApp(ctx, "текст", "⚙️ Настройки", "https://example.test/app/#zAA"); err != nil {
+	if err := b.SetMenuApp(ctx, "⚙️ Настройки", "https://example.test/app/#zAA"); err != nil {
 		t.Fatal(err)
 	}
-	m := srv.Calls("sendMessage")[0].Params["reply_markup"]
-	for _, want := range []string{`"keyboard"`, `"web_app":{"url":"https://example.test/app/#zAA"}`, `"is_persistent":true`} {
-		if !strings.Contains(m, want) {
-			t.Errorf("нет %s в %s", want, m)
+	c := srv.Calls("setChatMenuButton")[0].Params
+	for _, want := range []string{`"type":"web_app"`, `"web_app":{"url":"https://example.test/app/#zAA"}`} {
+		if !strings.Contains(c["menu_button"], want) {
+			t.Errorf("нет %s в %s", want, c["menu_button"])
 		}
+	}
+	if c["chat_id"] != fmt.Sprint(owner) {
+		t.Errorf("chat_id = %s", c["chat_id"])
+	}
+	if err := b.RemoveKeyboard(ctx, "текст"); err != nil {
+		t.Fatal(err)
+	}
+	if m := srv.Calls("sendMessage")[0].Params["reply_markup"]; !strings.Contains(m, `"remove_keyboard":true`) {
+		t.Errorf("reply_markup: %s", m)
 	}
 	if err := b.Setup(ctx); err != nil {
 		t.Fatal(err)
@@ -293,8 +302,8 @@ func TestSendWebAppAndSetup(t *testing.T) {
 	if len(Description) > 512 || len([]rune(ShortDescription)) > 120 {
 		t.Error("тексты профиля длиннее лимитов Telegram")
 	}
-	for _, m := range []string{"setMyDescription", "setMyShortDescription", "setChatMenuButton"} {
-		if len(srv.Calls(m)) != 1 {
+	for m, n := range map[string]int{"setMyDescription": 1, "setMyShortDescription": 1, "setChatMenuButton": 2} {
+		if len(srv.Calls(m)) != n {
 			t.Errorf("%s не вызван", m)
 		}
 	}

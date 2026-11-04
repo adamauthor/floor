@@ -1,6 +1,10 @@
 package core
 
 import (
+	"bytes"
+	"compress/flate"
+	"context"
+	"encoding/base64"
 	"encoding/json"
 	"strings"
 	"testing"
@@ -26,23 +30,48 @@ func (h *harness) submit(t *testing.T, edit func(*webapp.State)) string {
 	return string(raw)
 }
 
-func (h *harness) lastWebApp(t *testing.T) sent {
+// lastMenu — адрес последней поставленной кнопки меню.
+func (h *harness) lastMenu(t *testing.T) string {
 	t.Helper()
 	h.tg.mu.Lock()
 	defer h.tg.mu.Unlock()
-	if len(h.tg.webapps) == 0 {
-		t.Fatal("кнопка настроек не отправлена")
+	if len(h.tg.menus) == 0 {
+		t.Fatal("кнопка меню не поставлена")
 	}
-	return h.tg.webapps[len(h.tg.webapps)-1]
+	return h.tg.menus[len(h.tg.menus)-1].buttons[0].Data
+}
+
+func (h *harness) menuCount() int {
+	h.tg.mu.Lock()
+	defer h.tg.mu.Unlock()
+	return len(h.tg.menus)
+}
+
+// lastText — текст последнего отправленного сообщения.
+func (h *harness) lastText(t *testing.T) string {
+	t.Helper()
+	h.tg.mu.Lock()
+	defer h.tg.mu.Unlock()
+	if len(h.tg.msgs) == 0 {
+		t.Fatal("сообщений нет")
+	}
+	return h.tg.msgs[len(h.tg.msgs)-1].text
 }
 
 func TestSettingsSavedFromWebApp(t *testing.T) {
 	h := newHarness(t)
 	h.app.Cfg.WebAppURL = "https://example.test/app/"
+	api := "https://one.ngrok.test"
+	h.app.API = func(context.Context) (string, error) { return api, nil }
 	h.tick("2026-11-04 08:00", plus5) // карточка и первая кнопка
-	if got := h.lastWebApp(t); !strings.Contains(got.text, "под полем ввода") ||
-		!strings.HasPrefix(got.buttons[0].Data, "https://example.test/app/#z") {
-		t.Fatalf("первая кнопка: %+v", got)
+	if got := h.lastMenu(t); !strings.HasPrefix(got, "https://example.test/app/#z") {
+		t.Fatalf("первая кнопка: %s", got)
+	}
+	h.tg.mu.Lock()
+	removed := len(h.tg.removes) == 1 && strings.Contains(h.tg.removes[0], "слева от поля ввода")
+	h.tg.mu.Unlock()
+	if !removed {
+		t.Error("нет первого сообщения про кнопку меню")
 	}
 
 	data := h.submit(t, func(st *webapp.State) {
@@ -50,12 +79,13 @@ func TestSettingsSavedFromWebApp(t *testing.T) {
 		st.Settings.StepsFloor = 5000
 		st.Habits = append(st.Habits, habits.Habit{ID: "read", Emoji: "📖", Title: "Чтение", Anchor: "лёг", Action: "страница книги"})
 	})
-	h.app.OnWebAppData(ctx, data)
-
-	got := h.lastWebApp(t)
+	reply, ok := h.app.SaveSettings(ctx, data)
+	if !ok || h.lastText(t) != reply {
+		t.Fatalf("ответ %q, ok=%v", reply, ok)
+	}
 	for _, want := range []string{"✅ Сохранено", "подъём 07:00 → 09:30", "пол 5000", "новая привычка «Чтение»"} {
-		if !strings.Contains(got.text, want) {
-			t.Errorf("нет %q в %q", want, got.text)
+		if !strings.Contains(reply, want) {
+			t.Errorf("нет %q в %q", want, reply)
 		}
 	}
 	if c := h.app.conf(); c.WakeAnchor != (config.Clock{Hour: 9, Minute: 30}) || c.StepsFloor != 5000 {
@@ -81,12 +111,35 @@ func TestSettingsSavedFromWebApp(t *testing.T) {
 		t.Errorf("после перезапуска подъём %s", again.conf().WakeAnchor)
 	}
 
-	// Тик после сохранения не шлёт лишнюю кнопку: версия совпадает.
-	n := len(h.tg.webapps)
+	// Тик после сохранения не трогает кнопку: версия и адрес те же.
+	n := h.menuCount()
 	h.tick("2026-11-04 08:05", plus5)
-	if len(h.tg.webapps) != n {
-		t.Error("лишнее сообщение с кнопкой")
+	if h.menuCount() != n {
+		t.Error("лишнее обновление кнопки")
 	}
+	// Туннель переподнялся с новым адресом — кнопка обновляется.
+	api = "https://two.ngrok.test"
+	h.tick("2026-11-04 08:06", plus5)
+	if h.menuCount() != n+1 {
+		t.Error("кнопка не узнала новый адрес туннеля")
+	}
+	if st := decodeMenu(t, h.lastMenu(t)); st.API != api {
+		t.Errorf("api в кнопке: %q", st.API)
+	}
+}
+
+func decodeMenu(t *testing.T, url string) webapp.State {
+	t.Helper()
+	i := strings.Index(url, "#z")
+	raw, err := base64.RawURLEncoding.DecodeString(url[i+2:])
+	if err != nil {
+		t.Fatal(err)
+	}
+	var st webapp.State
+	if err := json.NewDecoder(flate.NewReader(bytes.NewReader(raw))).Decode(&st); err != nil {
+		t.Fatal(err)
+	}
+	return st
 }
 
 func TestStaleSettingsRejected(t *testing.T) {
@@ -97,8 +150,8 @@ func TestStaleSettingsRejected(t *testing.T) {
 		st.Settings.WakeAnchor = "05:00"
 	})
 	h.app.OnWebAppData(ctx, data)
-	if got := h.lastWebApp(t); !strings.Contains(got.text, "поменялись") {
-		t.Errorf("ответ: %q", got.text)
+	if got := h.lastText(t); !strings.Contains(got, "поменялись") {
+		t.Errorf("ответ: %q", got)
 	}
 	if h.app.conf().WakeAnchor.Hour != 7 {
 		t.Error("устаревшая правка применилась")
@@ -118,13 +171,13 @@ func TestInvalidSettingsRejected(t *testing.T) {
 		},
 	} {
 		h.app.OnWebAppData(ctx, h.submit(t, edit))
-		if got := h.lastWebApp(t); !strings.HasPrefix(got.text, "Не сохранил") {
-			t.Errorf("%s: ответ %q", name, got.text)
+		if got := h.lastText(t); !strings.HasPrefix(got, "Не сохранил") {
+			t.Errorf("%s: ответ %q", name, got)
 		}
 	}
 	h.app.OnWebAppData(ctx, "не json")
-	if got := h.lastWebApp(t); !strings.HasPrefix(got.text, "Не сохранил") {
-		t.Errorf("мусор: ответ %q", got.text)
+	if got := h.lastText(t); !strings.HasPrefix(got, "Не сохранил") {
+		t.Errorf("мусор: ответ %q", got)
 	}
 	_, f, _ := habits.Load(h.app.Cfg.HabitsFile, "2026-11-04")
 	if len(f.Habits) != 4 || h.app.conf().StepsFloor != 7000 {
@@ -155,8 +208,23 @@ func TestHandEditedHabitsRefreshButton(t *testing.T) {
 	if err := habits.Save(h.app.Cfg.HabitsFile, f); err != nil {
 		t.Fatal(err)
 	}
+	n := h.menuCount()
 	h.tick("2026-11-04 08:01", plus5)
-	if got := h.lastWebApp(t); got.text != "⚙️ Настройки обновлены." {
-		t.Errorf("ответ: %q", got.text)
+	if h.menuCount() != n+1 || !strings.Contains(h.lastMenu(t), "#z") {
+		t.Error("кнопка не обновилась после правки файла")
+	}
+}
+
+func TestLegacyKeyboardReplaced(t *testing.T) {
+	h := newHarness(t)
+	h.app.Cfg.WebAppURL = "https://example.test/app/"
+	if err := h.db.SetKV(ctx, kvSettingsRev, "abcdef012345"); err != nil { // версия от старой кнопки
+		t.Fatal(err)
+	}
+	h.tick("2026-11-04 08:00", plus5)
+	h.tg.mu.Lock()
+	defer h.tg.mu.Unlock()
+	if len(h.tg.removes) != 1 || !strings.Contains(h.tg.removes[0], "переехали") || len(h.tg.menus) != 1 {
+		t.Errorf("removes=%v menus=%d", h.tg.removes, len(h.tg.menus))
 	}
 }

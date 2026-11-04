@@ -4,7 +4,7 @@ LDFLAGS   := -s -w -X main.version=$(VERSION)
 FLOOR_DIR := $(HOME)/.floor
 PLIST     := com.floor.bot.plist
 
-.PHONY: build run test cover lint habits debug-day google-auth install-launchd uninstall-launchd logs deploy-fly help
+.PHONY: build run test cover lint habits debug-day google-auth install-launchd uninstall-launchd install-tunnel uninstall-tunnel logs deploy-fly help
 
 build: ## Собрать бинарь
 	CGO_ENABLED=0 go build -ldflags "$(LDFLAGS)" -o $(BIN) ./cmd/floor
@@ -46,6 +46,18 @@ install-launchd: build ## Поставить фоновым сервисом н�
 uninstall-launchd: ## Остановить и удалить сервис
 	launchctl bootout gui/$$(id -u)/com.floor.bot 2>/dev/null || true
 	rm -f $(HOME)/Library/LaunchAgents/$(PLIST)
+
+install-tunnel: ## Туннель ngrok, чтобы кнопка меню могла сохранять настройки
+	@command -v ngrok >/dev/null || (echo "Нет ngrok: brew install ngrok и ngrok config add-authtoken …" && exit 1)
+	mkdir -p $(FLOOR_DIR)/logs
+	sed "s|__HOME__|$(HOME)|g" deploy/launchd/com.floor.tunnel.plist > $(HOME)/Library/LaunchAgents/com.floor.tunnel.plist
+	launchctl bootout gui/$$(id -u)/com.floor.tunnel 2>/dev/null || true
+	launchctl bootstrap gui/$$(id -u) $(HOME)/Library/LaunchAgents/com.floor.tunnel.plist
+	@echo "Туннель запущен. Бот сам подхватит адрес за минуту."
+
+uninstall-tunnel: ## Остановить и удалить туннель
+	launchctl bootout gui/$$(id -u)/com.floor.tunnel 2>/dev/null || true
+	rm -f $(HOME)/Library/LaunchAgents/com.floor.tunnel.plist
 
 logs: ## Смотреть логи сервиса
 	tail -f $(FLOOR_DIR)/logs/floor.log

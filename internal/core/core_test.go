@@ -38,7 +38,8 @@ type fakeTG struct {
 	msgs    []sent
 	edits   []sent
 	pins    []int
-	webapps []sent // сообщения с кнопкой настроек; в buttons — адрес
+	menus   []sent   // кнопки меню: в text — подпись, в buttons[0].Data — адрес
+	removes []string // сообщения, убравшие кнопки под полем ввода
 	typing  int
 	sendErr error
 	editErr error
@@ -73,15 +74,24 @@ func (f *fakeTG) Pin(_ context.Context, id int) error {
 	return nil
 }
 
-func (f *fakeTG) SendWebApp(_ context.Context, text, label, url string) (int, error) {
+func (f *fakeTG) SetMenuApp(_ context.Context, label, url string) error {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	if f.sendErr != nil {
-		return 0, f.sendErr
+		return f.sendErr
 	}
-	f.nextID++
-	f.webapps = append(f.webapps, sent{f.nextID, text, []Button{{Text: label, Data: url}}})
-	return f.nextID, nil
+	f.menus = append(f.menus, sent{text: label, buttons: []Button{{Text: label, Data: url}}})
+	return nil
+}
+
+func (f *fakeTG) RemoveKeyboard(_ context.Context, text string) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.sendErr != nil {
+		return f.sendErr
+	}
+	f.removes = append(f.removes, text)
+	return nil
 }
 
 func (f *fakeTG) Typing(context.Context) error {

@@ -135,24 +135,28 @@ func (b *Bot) Send(ctx context.Context, text string, buttons []core.Button) (int
 	return msg.ID, nil
 }
 
-// SendWebApp отправляет сообщение и ставит постоянную кнопку страницы под полем ввода.
-// Только такая кнопка позволяет странице вернуть данные через sendData.
-func (b *Bot) SendWebApp(ctx context.Context, text, label, url string) (int, error) {
-	msg, err := b.api.SendMessage(ctx, &tg.SendMessageParams{
-		ChatID: b.owner, Text: text, ParseMode: models.ParseModeHTML,
-		ReplyMarkup: models.ReplyKeyboardMarkup{
-			Keyboard:       [][]models.KeyboardButton{{{Text: label, WebApp: &models.WebAppInfo{URL: url}}}},
-			IsPersistent:   true,
-			ResizeKeyboard: true,
+// SetMenuApp ставит владельцу кнопку меню слева от поля ввода, открывающую страницу.
+func (b *Bot) SetMenuApp(ctx context.Context, label, url string) error {
+	_, err := b.api.SetChatMenuButton(ctx, &tg.SetChatMenuButtonParams{
+		ChatID: b.owner,
+		MenuButton: models.MenuButtonWebApp{
+			Type: models.MenuButtonTypeWebApp, Text: label, WebApp: models.WebAppInfo{URL: url},
 		},
 	})
-	if err != nil {
-		return 0, b.scrub(err)
-	}
-	return msg.ID, nil
+	return b.scrub(err)
 }
 
-// Setup оформляет бота: меню команд и тексты профиля. Повтор безопасен.
+// RemoveKeyboard отправляет сообщение и убирает кнопки под полем ввода.
+func (b *Bot) RemoveKeyboard(ctx context.Context, text string) error {
+	_, err := b.api.SendMessage(ctx, &tg.SendMessageParams{
+		ChatID: b.owner, Text: text, ParseMode: models.ParseModeHTML,
+		ReplyMarkup: models.ReplyKeyboardRemove{RemoveKeyboard: true},
+	})
+	return b.scrub(err)
+}
+
+// Setup оформляет бота: команды и тексты профиля. Кнопку меню владельцу ставит
+// SetMenuApp; здесь — значение по умолчанию для остальных. Повтор безопасен.
 func (b *Bot) Setup(ctx context.Context) error {
 	_, err1 := b.api.SetMyCommands(ctx, &tg.SetMyCommandsParams{Commands: []models.BotCommand{
 		{Command: "settings", Description: "Привычки, время и шаги"},
@@ -172,7 +176,7 @@ const (
 		"☀️ Утром: подъём, сон, шаги и один шаг на сегодня.\n" +
 		"🌙 Вечером: один вопрос и одна кнопка.\n" +
 		"📅 В воскресенье: итог недели.\n\n" +
-		"Привычки, время и шаги — кнопка «⚙️ Настройки»."
+		"Привычки, время и шаги — кнопка «⚙️ Настройки» слева от поля ввода."
 )
 
 // Edit заменяет текст сообщения и убирает кнопки.

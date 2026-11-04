@@ -72,75 +72,100 @@ func (a *App) syncWakeDeltas(ctx context.Context) error {
 	return a.Store.SetKV(ctx, kvDeltaAnchor, anchor.String())
 }
 
-// sendSettings отправляет сообщение с кнопкой настроек, в адресе которой текущее состояние.
-func (a *App) sendSettings(ctx context.Context, text string, f habits.File) error {
+// menuState — состояние для кнопки меню вместе с текущим адресом туннеля.
+func (a *App) menuState(ctx context.Context, f habits.File) webapp.State {
 	st := webapp.NewState(a.conf().Settings(), f)
+	if a.API != nil {
+		if api, err := a.API(ctx); err == nil {
+			st.API = api
+		} else {
+			a.Log.Debug("webapp_api_unavailable", "error", err)
+		}
+	}
+	return st
+}
+
+// menuKey — что сейчас в кнопке меню: версия настроек и адрес туннеля.
+func menuKey(st webapp.State) string { return "menu " + st.Rev + " " + st.API }
+
+// setMenu ставит кнопку меню с состоянием в адресе.
+func (a *App) setMenu(ctx context.Context, st webapp.State) error {
 	url, err := webapp.URL(a.conf().WebAppURL, st)
 	if err != nil {
 		return err
 	}
-	if _, err := a.TG.SendWebApp(ctx, text, settingsLabel, url); err != nil {
+	if err := a.TG.SetMenuApp(ctx, settingsLabel, url); err != nil {
 		return fmt.Errorf("кнопка настроек: %w", err)
 	}
-	return a.Store.SetKV(ctx, kvSettingsRev, st.Rev)
+	return a.Store.SetKV(ctx, kvSettingsRev, menuKey(st))
 }
 
-// syncSettingsButton обновляет кнопку, когда настройки поменялись мимо неё: правкой
-// habits.json руками или первым запуском. Иначе страница откроется со старыми данными.
+// syncSettingsButton обновляет кнопку меню, когда поменялись настройки (в том числе
+// правкой habits.json руками) или адрес туннеля. Иначе страница откроется со старыми
+// данными или не сможет сохранить.
 func (a *App) syncSettingsButton(ctx context.Context, local time.Time) error {
 	if a.conf().WebAppURL == "" {
 		return nil
 	}
-	f := a.currentHabits(ctx, local.Format(time.DateOnly))
+	st := a.menuState(ctx, a.currentHabits(ctx, local.Format(time.DateOnly)))
 	stored, err := a.Store.GetKV(ctx, kvSettingsRev)
-	if err != nil || stored == webapp.Rev(a.conf().Settings(), f) {
+	if err != nil || stored == menuKey(st) {
 		return err
 	}
-	text := "⚙️ Настройки обновлены."
-	if stored == "" {
-		text = "⚙️ Привычки, время и шаги теперь меняются кнопкой «Настройки» под полем ввода."
+	if !strings.HasPrefix(stored, "menu ") {
+		// Первый запуск или переезд с кнопки под полем ввода: её надо убрать.
+		text := "⚙️ Привычки, время и шаги — кнопка «Настройки» слева от поля ввода."
+		if stored != "" {
+			text = "⚙️ Настройки переехали в кнопку слева от поля ввода."
+		}
+		if err := a.TG.RemoveKeyboard(ctx, text); err != nil {
+			return err
+		}
 	}
-	return a.sendSettings(ctx, text, f)
+	return a.setMenu(ctx, st)
 }
 
-// OnSettings — команда /settings: прислать свежую кнопку.
+// OnSettings — команда /settings: обновить кнопку меню и подсказать, где она.
 func (a *App) OnSettings(ctx context.Context) {
 	today := a.Now().In(a.location(ctx)).Format(time.DateOnly)
-	if err := a.sendSettings(ctx, "Кнопка «⚙️ Настройки» — под полем ввода.", a.currentHabits(ctx, today)); err != nil {
+	if err := a.setMenu(ctx, a.menuState(ctx, a.currentHabits(ctx, today))); err != nil {
+		a.Log.Warn("settings_send_failed", "error", err)
+	}
+	if _, err := a.TG.Send(ctx, "Настройки — кнопка «⚙️ Настройки» слева от поля ввода.", nil); err != nil {
 		a.Log.Warn("settings_send_failed", "error", err)
 	}
 }
 
-// OnWebAppData сохраняет настройки, присланные страницей.
-func (a *App) OnWebAppData(ctx context.Context, data string) {
+// OnWebAppData — настройки со старой кнопки под полем ввода (sendData).
+func (a *App) OnWebAppData(ctx context.Context, data string) { a.SaveSettings(ctx, data) }
+
+// SaveSettings сохраняет настройки со страницы, пишет итог в чат и возвращает его.
+func (a *App) SaveSettings(ctx context.Context, data string) (string, bool) {
 	a.tickMu.Lock()
-	saved := a.saveSettings(ctx, data)
+	text, saved := a.saveSettings(ctx, data)
 	a.tickMu.Unlock()
-	if saved {
-		a.Tick(ctx, a.Now()) // карточка и расписание сразу видят новое
+	if _, err := a.TG.Send(ctx, text, nil); err != nil {
+		a.Log.Warn("settings_send_failed", "error", err)
 	}
+	if saved {
+		a.Tick(ctx, a.Now()) // карточка, расписание и кнопка меню сразу видят новое
+	}
+	return text, saved
 }
 
-func (a *App) saveSettings(ctx context.Context, data string) bool {
+func (a *App) saveSettings(ctx context.Context, data string) (string, bool) {
 	today := a.Now().In(a.location(ctx)).Format(time.DateOnly)
 	cur := a.conf()
 	f := a.currentHabits(ctx, today)
-	reply := func(text string) {
-		if err := a.sendSettings(ctx, text, a.currentHabits(ctx, today)); err != nil {
-			a.Log.Warn("settings_send_failed", "error", err)
-		}
-	}
 
 	st, err := webapp.Parse(data)
 	if err != nil {
 		a.Log.Warn("settings_rejected", "error", err)
-		reply("Не сохранил: " + escape(err.Error()))
-		return false
+		return "Не сохранил: " + escape(err.Error()), false
 	}
 	if st.Rev != webapp.Rev(cur.Settings(), f) {
 		a.Log.Info("settings_stale")
-		reply("Пока окно было открыто, настройки поменялись. Открой ещё раз — там уже свежие.")
-		return false
+		return "Пока окно было открыто, настройки поменялись. Открой ещё раз — там уже свежие.", false
 	}
 	next := cur
 	nf := habits.File{Habits: normalize(st.Habits, today)}
@@ -150,20 +175,17 @@ func (a *App) saveSettings(ctx context.Context, data string) bool {
 	}
 	if err != nil {
 		a.Log.Warn("settings_rejected", "error", err)
-		reply("Не сохранил:\n" + escape(err.Error()))
-		return false
+		return "Не сохранил:\n" + escape(err.Error()), false
 	}
 
 	if err := habits.Save(cur.HabitsFile, nf); err != nil {
 		a.Log.Error("settings_save_failed", "error", err)
-		reply("Не сохранил: " + escape(err.Error()))
-		return false
+		return "Не сохранил: " + escape(err.Error()), false
 	}
 	raw, _ := json.Marshal(next.Settings())
 	if err := a.Store.SetKV(ctx, kvSettings, string(raw)); err != nil {
 		a.Log.Error("settings_save_failed", "error", err)
-		reply("Привычки сохранил, а время и шаги — нет. Попробуй ещё раз.")
-		return false
+		return "Привычки сохранил, а время и шаги — нет. Попробуй ещё раз.", false
 	}
 	a.setConf(next)
 	if err := a.syncWakeDeltas(ctx); err != nil {
@@ -176,8 +198,7 @@ func (a *App) saveSettings(ctx context.Context, data string) bool {
 	if len(changes) > 0 {
 		text += ": " + escape(strings.Join(changes, ", "))
 	}
-	reply(text)
-	return true
+	return text, true
 }
 
 // normalize чистит пробелы и ставит дату начала новым привычкам.
