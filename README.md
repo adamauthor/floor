@@ -144,7 +144,9 @@ flowchart LR
 
 Нужны Go 1.26+ и авторизованный `claude` CLI. Без него бот работает на запасных текстах.
 
-1. Создай бота у [@BotFather](https://t.me/BotFather), узнай свой id у [@userinfobot](https://t.me/userinfobot) и собери Команду на iPhone по [инструкции](docs/IPHONE_SHORTCUT.md).
+1. Создай бота у [@BotFather](https://t.me/BotFather) и узнай свой id у [@userinfobot](https://t.me/userinfobot). Подключи данные одним из способов:
+   - **Google Health** (по умолчанию): Fitbit отдаёт шаги и сон напрямую, без iPhone, см. [инструкцию](docs/GOOGLE_HEALTH.md), вход через `make google-auth`;
+   - **Команда на iPhone** (`HEALTH_SOURCE=file`): выгрузка из Apple «Здоровья» в iCloud Drive, см. [инструкцию](docs/IPHONE_SHORTCUT.md).
 
 2. Заполни `TELEGRAM_TOKEN` и `TELEGRAM_OWNER_ID`:
 
@@ -172,6 +174,7 @@ flowchart LR
 |---|---|
 | `make run` | Запустить с `.env` |
 | `make habits` | Показать привычки и якоря, проверить `habits.json` |
+| `make google-auth` | Войти в Google Health (`HEALTH_SOURCE=google`) |
 | `make debug-day DAY=2026-10-31` | Метрики дня из базы |
 | `make test` / `make cover` / `make lint` | Тесты с гонками, покрытие, `go vet` и staticcheck |
 | `make logs` | Логи фонового сервиса |
@@ -182,6 +185,7 @@ flowchart LR
 |---|---|
 | [`docs/SPEC.md`](docs/SPEC.md) | Техническое задание: сценарии, метрики, архитектура, критерии приёмки |
 | [`docs/HABITS.md`](docs/HABITS.md) | Привычки и якоря: как устроено, как менять, как выбрать якорь |
+| [`docs/GOOGLE_HEALTH.md`](docs/GOOGLE_HEALTH.md) | Как подключить Fitbit через Google Health API |
 | [`docs/IPHONE_SHORTCUT.md`](docs/IPHONE_SHORTCUT.md) | Как собрать Команду на iPhone |
 | [`docs/ACCEPTANCE.md`](docs/ACCEPTANCE.md) | Что проверено автотестами, а что ждёт реального телефона |
 | [`docs/RESEARCH.md`](docs/RESEARCH.md) | Проверка исходных исследований и обзор новых |

@@ -4,10 +4,12 @@ go 1.26.0
 
 require (
 	github.com/go-telegram/bot v1.27.0
+	golang.org/x/oauth2 v0.37.0
 	modernc.org/sqlite v1.61.0
 )
 
 require (
+	cloud.google.com/go/compute/metadata v0.3.0 // indirect
 	github.com/dustin/go-humanize v1.1.0 // indirect
 	github.com/google/uuid v1.6.0 // indirect
 	github.com/mattn/go-isatty v0.0.24 // indirect
