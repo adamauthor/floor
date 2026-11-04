@@ -235,6 +235,40 @@ func (s *Store) SetSleep(ctx context.Context, date, tz string, minutes int, wake
 	return nil
 }
 
+// RewriteWakeDeltas пересчитывает отклонение подъёма во всех днях: якорь сменился.
+func (s *Store) RewriteWakeDeltas(ctx context.Context, delta func(date string, wake time.Time) int) error {
+	rows, err := s.db.QueryContext(ctx, `SELECT date, wake_at FROM days WHERE wake_at IS NOT NULL`)
+	if err != nil {
+		return fmt.Errorf("чтение подъёмов: %w", err)
+	}
+	type wake struct {
+		date string
+		at   time.Time
+	}
+	var wakes []wake
+	for rows.Next() {
+		var date, raw string
+		if err := rows.Scan(&date, &raw); err != nil {
+			rows.Close()
+			return fmt.Errorf("чтение подъёмов: %w", err)
+		}
+		if t, err := time.Parse(time.RFC3339, raw); err == nil {
+			wakes = append(wakes, wake{date, t})
+		}
+	}
+	rows.Close()
+	if err := rows.Err(); err != nil {
+		return fmt.Errorf("чтение подъёмов: %w", err)
+	}
+	for _, w := range wakes {
+		if _, err := s.db.ExecContext(ctx, `UPDATE days SET wake_delta_min = ? WHERE date = ?`,
+			delta(w.date, w.at), w.date); err != nil {
+			return fmt.Errorf("запись подъёма: %w", err)
+		}
+	}
+	return nil
+}
+
 // ClearSleep убирает итог ночи, которой больше нет в полной выгрузке.
 func (s *Store) ClearSleep(ctx context.Context, date string, now time.Time) error {
 	_, err := s.db.ExecContext(ctx, `

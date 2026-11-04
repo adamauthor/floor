@@ -51,7 +51,7 @@ func dispatch(ctx context.Context, args []string) error {
 	case "debug-day":
 		return debugDay(ctx, args[1:])
 	case "habits":
-		return showHabits()
+		return showHabits(ctx)
 	case "google-auth":
 		return googleAuth(ctx)
 	case "version":
@@ -93,6 +93,14 @@ func run(ctx context.Context) error {
 		Cfg: cfg, Store: db, TG: tg, Log: log, Now: time.Now,
 		LLM: &llm.ClaudeCLI{Bin: cfg.ClaudeBin, Timeout: cfg.LLMTimeout, RetryDelay: 5 * time.Second, Log: log},
 	}
+	if err := app.LoadSettings(ctx); err != nil {
+		return err
+	}
+	go func() {
+		if err := tg.Setup(ctx); err != nil {
+			log.Warn("telegram_setup_failed", "error", err)
+		}
+	}()
 
 	src := source(ctx, cfg, log, tg)
 	var wg sync.WaitGroup
@@ -199,6 +207,9 @@ func debugDay(ctx context.Context, args []string) error {
 	}
 	defer db.Close()
 	app := &core.App{Cfg: cfg, Store: db, Log: log, Now: time.Now}
+	if err := app.LoadSettings(ctx); err != nil {
+		return err
+	}
 
 	switch cfg.HealthSource {
 	case "google":
@@ -234,10 +245,18 @@ func debugDay(ctx context.Context, args []string) error {
 	return nil
 }
 
-func showHabits() error {
+func showHabits(ctx context.Context) error {
 	cfg, err := config.LoadLocal()
 	if err != nil {
 		return fmt.Errorf("конфигурация:\n%w", err)
+	}
+	// время подъёма могло поменяться в настройках Telegram
+	if db, err := store.Open(ctx, cfg.DBPath); err == nil {
+		app := &core.App{Cfg: cfg, Store: db, Log: slog.New(slog.DiscardHandler), Now: time.Now}
+		if err := app.LoadSettings(ctx); err == nil {
+			cfg = app.Cfg
+		}
+		db.Close()
 	}
 	today := time.Now().In(cfg.DefaultTZ).Format(time.DateOnly)
 	_, f, err := habits.Load(cfg.HabitsFile, today)

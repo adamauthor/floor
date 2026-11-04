@@ -1,0 +1,515 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, viewport-fit=cover">
+<meta name="robots" content="noindex">
+<title>Floor · Настройки</title>
+<script src="https://telegram.org/js/telegram-web-app.js"></script>
+<style>
+:root {
+  --bg: var(--tg-theme-secondary-bg-color, #efeff4);
+  --cell: var(--tg-theme-section-bg-color, var(--tg-theme-bg-color, #fff));
+  --text: var(--tg-theme-text-color, #000);
+  --hint: var(--tg-theme-hint-color, #8e8e93);
+  --sub: var(--tg-theme-subtitle-text-color, var(--hint));
+  --head: var(--tg-theme-section-header-text-color, var(--hint));
+  --link: var(--tg-theme-link-color, #007aff);
+  --accent: var(--tg-theme-button-color, #007aff);
+  --on-accent: var(--tg-theme-button-text-color, #fff);
+  --danger: var(--tg-theme-destructive-text-color, #ff3b30);
+  --sep: var(--tg-theme-section-separator-color, rgba(60, 60, 67, .18));
+  --soft: color-mix(in srgb, var(--hint) 14%, transparent);
+  --r: 12px;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not(.tg) {
+    --bg: #000; --cell: #1c1c1e; --text: #fff; --hint: #8e8e93;
+    --sep: rgba(84, 84, 88, .6); --link: #0a84ff; --accent: #0a84ff; --danger: #ff453a;
+  }
+}
+* { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+html, body { margin: 0; background: var(--bg); color: var(--text); }
+body {
+  font: 17px/1.3 -apple-system, BlinkMacSystemFont, "SF Pro Text", Roboto, "Segoe UI", sans-serif;
+  -webkit-font-smoothing: antialiased;
+  padding: 8px 16px calc(32px + env(safe-area-inset-bottom));
+  max-width: 560px; margin: 0 auto;
+}
+body.web { padding-bottom: calc(96px + env(safe-area-inset-bottom)); }
+input, textarea, button { font: inherit; color: inherit; }
+button { background: none; border: 0; padding: 0; cursor: pointer; }
+
+.view.enter { animation: in .18s ease-out; }
+@keyframes in { from { opacity: 0; transform: translateY(6px); } }
+
+.title { font-size: 28px; font-weight: 700; letter-spacing: -.02em; margin: 12px 4px 4px; }
+.lead { color: var(--hint); font-size: 15px; margin: 0 4px 20px; }
+
+.head { color: var(--head); font-size: 13px; text-transform: uppercase; letter-spacing: .03em;
+  margin: 24px 16px 6px; display: flex; justify-content: space-between; }
+.foot { color: var(--hint); font-size: 13px; line-height: 1.35; margin: 6px 16px 0; }
+.group { background: var(--cell); border-radius: var(--r); overflow: hidden; }
+
+.row { display: flex; align-items: center; gap: 12px; min-height: 48px; padding: 8px 16px;
+  position: relative; width: 100%; text-align: left; }
+.row + .row::before { content: ""; position: absolute; top: 0; right: 0; left: 16px;
+  border-top: .5px solid var(--sep); }
+.row.icon + .row::before { left: 60px; }
+button.row:active { background: var(--soft); }
+.row .label { flex: 1; min-width: 0; }
+.row .value { color: var(--hint); }
+.chev { width: 8px; height: 13px; flex: none; opacity: .35; }
+
+.habit .emoji { width: 32px; height: 32px; border-radius: 8px; background: var(--soft);
+  display: grid; place-items: center; font-size: 19px; flex: none; }
+.habit .name { font-weight: 500; display: flex; gap: 6px; align-items: baseline; }
+.habit .when { color: var(--sub); font-size: 14px; line-height: 1.3; margin-top: 2px;
+  display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+.habit.paused .emoji, .habit.paused .label { opacity: .45; }
+.tag { font-size: 11px; font-weight: 600; color: var(--hint); background: var(--soft);
+  border-radius: 6px; padding: 1px 6px; white-space: nowrap; }
+.tag.floor { color: var(--accent); background: color-mix(in srgb, var(--accent) 12%, transparent); }
+.add { color: var(--link); }
+.add .emoji { background: none; color: var(--link); font-size: 26px; font-weight: 300; }
+
+input[type=time] { background: var(--soft); border: 0; border-radius: 8px; padding: 5px 10px;
+  min-width: 84px; text-align: center; font-variant-numeric: tabular-nums; appearance: none; }
+input[type=time]::-webkit-calendar-picker-indicator { display: none; }
+
+.seg { display: flex; background: var(--soft); border-radius: 9px; padding: 2px; }
+.seg button { padding: 5px 10px; border-radius: 7px; font-size: 14px; font-weight: 500;
+  color: var(--text); font-variant-numeric: tabular-nums; }
+.seg button.on { background: var(--cell); box-shadow: 0 1px 3px rgba(0, 0, 0, .12); }
+
+.step { display: flex; align-items: center; background: var(--soft); border-radius: 9px; }
+.step button { width: 36px; height: 32px; font-size: 20px; color: var(--link); }
+.step input { width: 64px; border: 0; background: none; text-align: center;
+  font-variant-numeric: tabular-nums; padding: 0; }
+.step input:focus { outline: none; }
+
+.field { display: block; padding: 11px 16px; }
+.field input, .field textarea { width: 100%; border: 0; background: none; padding: 0; outline: none; resize: none; }
+.field textarea { min-height: 24px; line-height: 1.35; overflow: hidden; }
+.field .cap { display: block; font-size: 13px; color: var(--hint); margin-bottom: 2px; }
+::placeholder { color: var(--hint); opacity: .7; }
+
+.hero { display: flex; gap: 12px; align-items: center; padding: 12px 16px; }
+.hero input.em { width: 52px; height: 52px; border-radius: 14px; background: var(--soft); border: 0;
+  text-align: center; font-size: 28px; padding: 0; outline: none; flex: none; }
+.hero input.nm { flex: 1; border: 0; background: none; font-size: 20px; font-weight: 600; outline: none; padding: 0; min-width: 0; }
+
+.chip { display: inline-flex; margin-top: 8px; font-size: 13px; font-weight: 500; color: var(--link);
+  background: color-mix(in srgb, var(--link) 10%, transparent); border-radius: 8px; padding: 4px 9px; }
+
+.sw { position: relative; width: 51px; height: 31px; flex: none; }
+.sw input { position: absolute; inset: 0; opacity: 0; margin: 0; cursor: pointer; }
+.sw i { position: absolute; inset: 0; border-radius: 16px; background: var(--soft); transition: background .2s; pointer-events: none; }
+.sw i::after { content: ""; position: absolute; top: 2px; left: 2px; width: 27px; height: 27px; border-radius: 50%;
+  background: #fff; box-shadow: 0 2px 4px rgba(0, 0, 0, .2); transition: transform .2s; }
+.sw input:checked + i { background: #34c759; }
+.sw input:checked + i::after { transform: translateX(20px); }
+
+.center { justify-content: center; text-align: center; }
+.danger { color: var(--danger); }
+.link { color: var(--link); }
+.muted { opacity: .35; pointer-events: none; }
+
+.empty { text-align: center; color: var(--hint); padding: 30vh 24px 0; }
+.empty b { display: block; color: var(--text); font-size: 20px; margin-bottom: 8px; }
+
+#save { position: fixed; left: 16px; right: 16px; bottom: calc(16px + env(safe-area-inset-bottom));
+  max-width: 528px; margin: 0 auto; height: 50px; border-radius: var(--r); background: var(--accent);
+  color: var(--on-accent); font-weight: 600; display: none; }
+body.web.dirty #save { display: block; }
+
+#toast { position: fixed; left: 50%; bottom: calc(80px + env(safe-area-inset-bottom)); transform: translateX(-50%);
+  background: rgba(0, 0, 0, .8); color: #fff; padding: 10px 14px; border-radius: 10px; font-size: 14px;
+  max-width: calc(100% - 32px); opacity: 0; transition: opacity .2s; pointer-events: none; white-space: pre-line; }
+#toast.on { opacity: 1; }
+</style>
+</head>
+<body>
+<main id="app"></main>
+<button id="save" type="button">Сохранить</button>
+<div id="toast"></div>
+<script>
+(() => {
+  'use strict';
+  const tg = window.Telegram && window.Telegram.WebApp;
+  const inTG = !!(tg && tg.initData);
+  const MAX_ACTIVE = 5;
+  const LIMIT = 4096; // предел sendData
+  const app = document.getElementById('app');
+
+  let initial = '';   // как пришло от бота, JSON
+  let state = null;   // текущая правка
+  let view = { name: 'main' };
+
+  // ---------- состояние из адреса ----------
+
+  function token() {
+    const raw = (location.hash || '').replace(/^#/, '');
+    const t = raw.split(/[&?#]/)[0];
+    return /^z[A-Za-z0-9_-]+$/.test(t) ? t.slice(1) : t === 'demo' ? 'demo' : '';
+  }
+
+  async function inflate(b64) {
+    const bin = atob(b64.replace(/-/g, '+').replace(/_/g, '/'));
+    const bytes = Uint8Array.from(bin, c => c.charCodeAt(0));
+    const stream = new Blob([bytes]).stream().pipeThrough(new DecompressionStream('deflate-raw'));
+    return JSON.parse(await new Response(stream).text());
+  }
+
+  const DEMO = {
+    v: 1, rev: 'demo',
+    s: { wake: '10:00', tol: 60, floor: 7000, goal: 10000, evening: '21:00', weekly: '20:00' },
+    h: [
+      { id: 'wake', emoji: '⏰', title: 'Подъём', anchor: 'звонит будильник в {wake}', action: 'встаю и сразу открываю шторы', since: '2026-11-04' },
+      { id: 'teeth', emoji: '🦷', title: 'Зубы', anchor: 'встал с кровати', action: 'зубы до телефона', floor_label: 'зубы', since: '2026-11-04' },
+      { id: 'outside', emoji: '🚶', title: 'Улица', anchor: 'почистил зубы', action: 'одеваюсь и 10 минут на улице, хоть до магазина', floor_label: 'выйти на улицу', since: '2026-11-04' },
+      { id: 'tidy', emoji: '📦', title: 'Вещь на место', anchor: 'вернулся с улицы', action: 'кладу одну вещь на место', floor_label: 'одна вещь на место', since: '2026-11-04' },
+      { id: 'night', emoji: '🌙', title: 'Отбой', anchor: 'ответил боту на вечерний вопрос', action: 'ставлю будильник, телефон на зарядку подальше от кровати', since: '2026-11-04', paused: true },
+    ],
+  };
+
+  async function load() {
+    const t = token();
+    if (t === 'demo') return structuredClone(DEMO);
+    if (t) {
+      const st = await inflate(t);
+      try { sessionStorage.setItem('floor', JSON.stringify(st)); } catch (e) {}
+      return st;
+    }
+    try { const saved = sessionStorage.getItem('floor'); if (saved) return JSON.parse(saved); } catch (e) {}
+    return null;
+  }
+
+  // ---------- мелочи ----------
+
+  function el(tag, attrs, ...kids) {
+    const n = document.createElement(tag);
+    for (const [k, v] of Object.entries(attrs || {})) {
+      if (v == null || v === false) continue;
+      if (k === 'class') n.className = v;
+      else if (k.startsWith('on')) n.addEventListener(k.slice(2), v);
+      else if (k === 'value' || (k in n && typeof v !== 'string')) n[k] = v;
+      else n.setAttribute(k, v === true ? '' : v);
+    }
+    for (const kid of kids.flat()) if (kid != null && kid !== false) n.append(kid);
+    return n;
+  }
+
+  const chevron = () => {
+    const s = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+    s.setAttribute('viewBox', '0 0 8 13'); s.setAttribute('class', 'chev');
+    s.innerHTML = '<path d="M1 1l5.5 5.5L1 12" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>';
+    return s;
+  };
+
+  const haptic = kind => { try { tg && tg.HapticFeedback && (kind === 'sel' ? tg.HapticFeedback.selectionChanged() : tg.HapticFeedback.notificationOccurred(kind)); } catch (e) {} };
+
+  let toastTimer;
+  function toast(text) {
+    const t = document.getElementById('toast');
+    t.textContent = text; t.classList.add('on');
+    clearTimeout(toastTimer); toastTimer = setTimeout(() => t.classList.remove('on'), 2600);
+  }
+  function alertMsg(text) {
+    if (inTG && tg.isVersionAtLeast('6.2')) tg.showAlert(text); else toast(text);
+  }
+  function confirmMsg(text) {
+    return new Promise(res => {
+      if (inTG && tg.isVersionAtLeast('6.2')) tg.showConfirm(text, res); else res(window.confirm(text));
+    });
+  }
+
+  const fmt = n => String(n).replace(/\B(?=(\d{3})+(?!\d))/g, ' ');
+  const active = () => state.h.filter(h => !h.paused);
+  const anchorText = h => h.anchor.replaceAll('{wake}', state.s.wake);
+  const addMin = (clock, m) => {
+    const [h, mm] = clock.split(':').map(Number);
+    const t = ((h * 60 + mm + m) % 1440 + 1440) % 1440;
+    return String(Math.floor(t / 60)).padStart(2, '0') + ':' + String(t % 60).padStart(2, '0');
+  };
+  function week(since) {
+    const d = (Date.now() - new Date(since + 'T00:00:00')) / 864e5;
+    return d < 0 ? 1 : Math.floor(d / 7) + 1;
+  }
+  function lastGrapheme(v) {
+    v = v.trim();
+    if (!v) return '';
+    if (window.Intl && Intl.Segmenter) return [...new Intl.Segmenter().segment(v)].pop().segment;
+    return [...v].pop();
+  }
+  function autosize(t) { t.style.height = 'auto'; t.style.height = t.scrollHeight + 'px'; }
+
+  // ---------- главная ----------
+
+  function habitRow(h, i) {
+    return el('button', { class: 'row icon habit' + (h.paused ? ' paused' : ''), type: 'button', onclick: () => go({ name: 'habit', i }) },
+      el('span', { class: 'emoji' }, h.emoji || '•'),
+      el('span', { class: 'label' },
+        el('span', { class: 'name' }, h.title,
+          h.paused ? el('span', { class: 'tag' }, 'пауза') : h.floor_label ? el('span', { class: 'tag floor' }, 'пол') : null),
+        el('span', { class: 'when' }, 'когда ' + anchorText(h) + ' → ' + h.action)),
+      chevron());
+  }
+
+  function timeInput(key) {
+    return el('input', { type: 'time', value: state.s[key], required: true,
+      onchange: e => { if (e.target.value) { state.s[key] = e.target.value; changed(); render(); } } });
+  }
+
+  function stepper(key, sign) {
+    const set = v => {
+      v = Math.round(Math.min(50000, Math.max(500, v)) / 100) * 100;
+      state.s[key] = v;
+      // пол не выше цели: тянем вторую границу за собой
+      if (sign > 0 && state.s.floor > state.s.goal) state.s.goal = state.s.floor;
+      if (sign < 0 && state.s.goal < state.s.floor) state.s.floor = state.s.goal;
+      changed(); render();
+    };
+    return el('span', { class: 'step' },
+      el('button', { type: 'button', 'aria-label': 'меньше', onclick: () => { haptic('sel'); set(state.s[key] - 500); } }, '−'),
+      el('input', { inputmode: 'numeric', value: fmt(state.s[key]),
+        onfocus: e => { e.target.value = state.s[key]; e.target.select(); },
+        onchange: e => set(parseInt(e.target.value.replace(/\D/g, ''), 10) || state.s[key]),
+        onkeydown: e => { if (e.key === 'Enter') e.target.blur(); } }),
+      el('button', { type: 'button', 'aria-label': 'больше', onclick: () => { haptic('sel'); set(state.s[key] + 500); } }, '+'));
+  }
+
+  function mainView() {
+    const s = state.s;
+    const labels = active().filter(h => h.floor_label).map(h => h.floor_label);
+    const full = active().length >= MAX_ACTIVE;
+    return el('div', { class: 'view' },
+      el('div', { class: 'title' }, 'Настройки'),
+      el('p', { class: 'lead' }, 'Пол дня — минимум, который выполним даже в плохой день.'),
+
+      el('div', { class: 'head' }, el('span', {}, 'Привычки'), el('span', {}, active().length + ' из ' + MAX_ACTIVE)),
+      el('div', { class: 'group' },
+        state.h.map(habitRow),
+        el('button', { class: 'row icon habit add' + (full ? ' muted' : ''), type: 'button', onclick: addHabit },
+          el('span', { class: 'emoji' }, '+'), el('span', { class: 'label' }, 'Новая привычка'))),
+      el('div', { class: 'foot' }, full
+        ? 'Пять активных — предел. Чтобы добавить новую, поставь одну на паузу.'
+        : labels.length ? 'Вечером бот спросит: ' + labels.join(' · ') + '.' : 'Отметь в привычке «Входит в пол дня» — о ней бот спросит вечером.'),
+
+      el('div', { class: 'head' }, 'Подъём'),
+      el('div', { class: 'group' },
+        el('label', { class: 'row' }, el('span', { class: 'label' }, 'Будильник'), timeInput('wake')),
+        el('div', { class: 'row' }, el('span', { class: 'label' }, 'В норме'),
+          el('span', { class: 'seg' }, [30, 45, 60, 90].map(m =>
+            el('button', { type: 'button', class: s.tol === m ? 'on' : '', onclick: () => { haptic('sel'); s.tol = m; changed(); render(); } }, '±' + m))))),
+      el('div', { class: 'foot' }, 'Подъём засчитан с ' + addMin(s.wake, -s.tol) + ' до ' + addMin(s.wake, s.tol) + '. Регулярность важнее длительности сна.'),
+
+      el('div', { class: 'head' }, 'Шаги'),
+      el('div', { class: 'group' },
+        el('div', { class: 'row' }, el('span', { class: 'label' }, 'Пол'), stepper('floor', 1)),
+        el('div', { class: 'row' }, el('span', { class: 'label' }, 'Цель'), stepper('goal', -1))),
+      el('div', { class: 'foot' }, 'Основная польза набирается к 7 000 шагов, дальше прирост небольшой.'),
+
+      el('div', { class: 'head' }, 'Сообщения'),
+      el('div', { class: 'group' },
+        el('label', { class: 'row' }, el('span', { class: 'label' }, 'Вечерний вопрос'), timeInput('evening')),
+        el('label', { class: 'row' }, el('span', { class: 'label' }, 'Итог недели, воскресенье'), timeInput('weekly'))),
+      el('div', { class: 'foot' }, 'Утро приходит через 30 минут после подъёма по данным часов, но не позже ' + addMin(s.wake, 180) + '.'));
+  }
+
+  // ---------- привычка ----------
+
+  function addHabit() {
+    if (active().length >= MAX_ACTIVE) {
+      alertMsg('Пять активных привычек — предел. Поставь одну на паузу, чтобы добавить новую.');
+      return;
+    }
+    state.h.push({ id: 'h' + Date.now().toString(36), emoji: '', title: '', anchor: '', action: '', since: '', isNew: true });
+    go({ name: 'habit', i: state.h.length - 1 });
+  }
+
+  function habitView(i) {
+    const h = state.h[i];
+    const area = (key, placeholder) => {
+      const t = el('textarea', { rows: 1, placeholder, value: h[key],
+        oninput: e => { h[key] = e.target.value; autosize(e.target); changed(); } });
+      requestAnimationFrame(() => autosize(t));
+      return t;
+    };
+    const toggle = (checked, onchange) => el('span', { class: 'sw' },
+      el('input', { type: 'checkbox', checked, onchange: e => { haptic('sel'); onchange(e.target.checked, e.target); } }), el('i'));
+
+    const whenArea = area('anchor', 'закрыл ноутбук');
+    return el('div', { class: 'view' },
+      el('div', { class: 'title' }, h.isNew ? 'Новая привычка' : h.title || 'Привычка'),
+      el('p', { class: 'lead' }, h.since ? 'Неделя ' + week(h.since) + '. Пропуски возраст не сбрасывают.' : 'Связка «когда X → делаю Y». X уже случается каждый день сам.'),
+
+      el('div', { class: 'group' },
+        el('div', { class: 'hero' },
+          el('input', { class: 'em', value: h.emoji, placeholder: '🙂', maxlength: 8, 'aria-label': 'значок',
+            oninput: e => { h.emoji = lastGrapheme(e.target.value); e.target.value = h.emoji; changed(); } }),
+          el('input', { class: 'nm', value: h.title, placeholder: 'Название', 'aria-label': 'название',
+            oninput: e => { h.title = e.target.value; changed(); } }))),
+
+      el('div', { class: 'head' }, 'Когда'),
+      el('div', { class: 'group' },
+        el('label', { class: 'field' }, whenArea,
+          !h.anchor.includes('{wake}') ? el('button', { type: 'button', class: 'chip', onclick: e => {
+            e.preventDefault();
+            const pos = whenArea.selectionStart ?? h.anchor.length;
+            h.anchor = h.anchor.slice(0, pos) + '{wake}' + h.anchor.slice(pos);
+            changed(); render();
+          } }, '+ время подъёма') : null)),
+      el('div', { class: 'foot' }, h.anchor.includes('{wake}')
+        ? '{wake} подставится как ' + state.s.wake + ' и поменяется вместе с будильником.'
+        : 'Событие, а не намерение: «закрыл ноутбук», а не «вечером».'),
+
+      el('div', { class: 'head' }, 'Что делаю'),
+      el('div', { class: 'group' }, el('label', { class: 'field' }, area('action', 'куртка и 10 минут на улице'))),
+      el('div', { class: 'foot' }, 'Одно маленькое действие, выполнимое без желания.'),
+
+      el('div', { class: 'group', style: 'margin-top:24px' },
+        el('label', { class: 'row' }, el('span', { class: 'label' }, 'Входит в пол дня'),
+          toggle(!!h.floor_label, on => {
+            h.floor_label = on ? (h.title || 'привычка').toLowerCase() : '';
+            changed(); render();
+          })),
+        h.floor_label ? el('label', { class: 'field' },
+          el('span', { class: 'cap' }, 'Как спросить вечером'),
+          el('input', { value: h.floor_label, oninput: e => { h.floor_label = e.target.value; changed(); } })) : null,
+        el('label', { class: 'row' }, el('span', { class: 'label' }, 'На паузе'),
+          toggle(!!h.paused, (on, input) => {
+            if (!on && active().length >= MAX_ACTIVE) { input.checked = true; alertMsg('Уже пять активных привычек. Сначала поставь на паузу другую.'); return; }
+            h.paused = on || undefined; changed(); render();
+          }))),
+      el('div', { class: 'foot' }, 'Пауза убирает привычку отовсюду, но сохраняет её возраст.'),
+
+      el('div', { class: 'group', style: 'margin-top:24px' },
+        state.h.length > 1 ? el('button', { type: 'button', class: 'row link' + (i === 0 ? ' muted' : ''), onclick: () => move(i, -1) }, 'Выше в списке') : null,
+        state.h.length > 1 ? el('button', { type: 'button', class: 'row link' + (i === state.h.length - 1 ? ' muted' : ''), onclick: () => move(i, 1) }, 'Ниже в списке') : null,
+        el('button', { type: 'button', class: 'row danger', onclick: () => remove(i) }, 'Удалить привычку')),
+      el('div', { style: 'height:24px' }));
+  }
+
+  function move(i, d) {
+    const j = i + d;
+    if (j < 0 || j >= state.h.length) return;
+    [state.h[i], state.h[j]] = [state.h[j], state.h[i]];
+    haptic('sel'); changed(); go({ name: 'habit', i: j }, true);
+  }
+
+  async function remove(i) {
+    const h = state.h[i];
+    if (!h.isNew && !(await confirmMsg('Удалить «' + (h.title || 'привычку') + '»? Возраст привычки пропадёт. Если хочешь вернуться к ней позже — поставь на паузу.'))) return;
+    state.h.splice(i, 1);
+    haptic('warning'); changed(); go({ name: 'main' });
+  }
+
+  const incomplete = h => !h.title.trim() || !h.anchor.trim() || !h.action.trim();
+
+  async function back() {
+    if (view.name !== 'habit') return;
+    const h = state.h[view.i];
+    if (h && incomplete(h)) {
+      const empty = !h.title.trim() && !h.anchor.trim() && !h.action.trim();
+      if (h.isNew && (empty || await confirmMsg('Привычка не заполнена. Выбросить её?'))) {
+        state.h.splice(view.i, 1); changed();
+      } else {
+        alertMsg('Заполни название, «когда» и «что делаю».');
+        return;
+      }
+    }
+    go({ name: 'main' });
+  }
+
+  // ---------- сохранение ----------
+
+  function payload() {
+    return {
+      v: state.v, rev: state.rev, s: { ...state.s },
+      h: state.h.map(({ isNew, ...h }) => {
+        const out = { id: h.id, title: h.title.trim(), anchor: h.anchor.trim(), action: h.action.trim(), since: h.since || '' };
+        if (h.emoji) out.emoji = h.emoji;
+        if (h.floor_label && h.floor_label.trim()) out.floor_label = h.floor_label.trim();
+        if (h.paused) out.paused = true;
+        return out;
+      }),
+    };
+  }
+
+  const dirty = () => JSON.stringify(payload()) !== initial;
+
+  function save() {
+    const bad = state.h.findIndex(incomplete);
+    if (bad >= 0) { go({ name: 'habit', i: bad }); alertMsg('Заполни название, «когда» и «что делаю».'); return; }
+    if (!active().length) { alertMsg('Нужна хотя бы одна активная привычка.'); return; }
+    const data = JSON.stringify(payload());
+    if (new TextEncoder().encode(data).length > LIMIT) { alertMsg('Слишком много текста — сократи формулировки.'); return; }
+    if (!inTG) { toast('Это предпросмотр: сохранить можно только из Telegram.'); return; }
+    haptic('success');
+    tg.sendData(data); // Telegram закроет окно, бот ответит в чате
+  }
+
+  function changed() {
+    const d = dirty();
+    document.body.classList.toggle('dirty', d);
+    if (!inTG) return;
+    if (d) tg.MainButton.setParams({ text: 'Сохранить', is_visible: true, is_active: true });
+    else tg.MainButton.hide();
+    if (tg.isVersionAtLeast('6.2')) d ? tg.enableClosingConfirmation() : tg.disableClosingConfirmation();
+  }
+
+  // ---------- навигация ----------
+
+  function go(next, keepScroll) {
+    view = next;
+    render(true);
+    if (!keepScroll) window.scrollTo(0, 0);
+    if (inTG && tg.isVersionAtLeast('6.1')) next.name === 'main' ? tg.BackButton.hide() : tg.BackButton.show();
+  }
+
+  function render(enter) {
+    const y = window.scrollY;
+    const v = view.name === 'habit' && state.h[view.i] ? habitView(view.i) : mainView();
+    if (enter) v.classList.add('enter');
+    app.replaceChildren(v);
+    window.scrollTo(0, y);
+  }
+
+  function empty(title, text) {
+    app.replaceChildren(el('div', { class: 'empty' }, el('b', {}, title), text));
+  }
+
+  // ---------- старт ----------
+
+  async function start() {
+    if (inTG) {
+      document.documentElement.classList.add('tg');
+      tg.ready(); tg.expand();
+      if (tg.isVersionAtLeast('6.1')) { tg.setHeaderColor('secondary_bg_color'); tg.setBackgroundColor('secondary_bg_color'); }
+      if (tg.isVersionAtLeast('7.7')) tg.disableVerticalSwipes();
+      tg.MainButton.onClick(save);
+      if (tg.isVersionAtLeast('6.1')) tg.BackButton.onClick(back);
+    } else {
+      document.body.classList.add('web');
+      document.getElementById('save').addEventListener('click', save);
+      window.addEventListener('keydown', e => { if (e.key === 'Escape') back(); });
+    }
+    let st;
+    try { st = await load(); } catch (e) {
+      empty('Не открылось', 'Не удалось прочитать настройки. Нажми «⚙️ Настройки» в чате ещё раз или обнови Telegram.');
+      return;
+    }
+    if (!st) { empty('Настройки Floor', 'Открой их из бота: кнопка «⚙️ Настройки» под полем ввода.'); return; }
+    if (st.v !== 1) { empty('Нужна свежая версия', 'Отправь боту /settings — придёт новая кнопка.'); return; }
+    state = structuredClone(st);
+    state.h = state.h || [];
+    initial = JSON.stringify(payload());
+    render(true);
+  }
+
+  start();
+})();
+</script>
+</body>
+</html>

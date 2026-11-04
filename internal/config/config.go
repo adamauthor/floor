@@ -27,6 +27,7 @@ type Config struct {
 	DefaultTZ        *time.Location
 
 	HabitsFile string
+	WebAppURL  string // страница настроек (Telegram Mini App)
 
 	HealthSource string // "file" | "http" | "google"
 	HealthFile   string
@@ -97,6 +98,7 @@ func LoadLocal() (Config, error) {
 		DefaultTZ:        r.location("DEFAULT_TZ", "Asia/Almaty"),
 
 		HabitsFile: expandHome(r.str("HABITS_FILE", "~/.floor/habits.json")),
+		WebAppURL:  r.str("WEBAPP_URL", "https://adamauthor.github.io/floor/app/"),
 
 		HealthSource: r.str("HEALTH_SOURCE", "file"),
 		HealthFile:   expandHome(r.str("HEALTH_FILE", "~/Library/Mobile Documents/com~apple~CloudDocs/Floor/health.json")),

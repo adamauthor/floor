@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"fmt"
 	"log/slog"
 	"strings"
 	"sync"
@@ -27,6 +28,8 @@ type fakeHandler struct {
 	starts   int
 	callback string
 	answer   string
+	settings int
+	webapp   []string
 }
 
 func (h *fakeHandler) OnCallback(_ context.Context, data string, _ int) string {
@@ -44,6 +47,16 @@ func (h *fakeHandler) OnNonText(context.Context) {
 	h.mu.Lock()
 	defer h.mu.Unlock()
 	h.nonText++
+}
+func (h *fakeHandler) OnSettings(context.Context) {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	h.settings++
+}
+func (h *fakeHandler) OnWebAppData(_ context.Context, data string) {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	h.webapp = append(h.webapp, data)
 }
 func (h *fakeHandler) OnStart(context.Context) {
 	h.mu.Lock()
@@ -237,5 +250,52 @@ func TestErrorsDoNotLeakToken(t *testing.T) {
 	<-done
 	if strings.Contains(logs.String(), "SECRET-TOKEN") {
 		t.Errorf("токен в логе:\n%s", logs.String())
+	}
+}
+
+func TestSettingsRouting(t *testing.T) {
+	_, srv, h, _ := setup(t)
+	srv.PushText(owner, "/settings")
+	srv.PushUpdate(fmt.Sprintf(`{"message":{"message_id":3,"date":1,"chat":{"id":%d,"type":"private"},"from":{"id":%d,"is_bot":false,"first_name":"x"},"web_app_data":{"data":"{\"v\":1}","button_text":"⚙️ Настройки"}}}`, owner, owner))
+	srv.PushUpdate(fmt.Sprintf(`{"message":{"message_id":4,"date":1,"chat":{"id":%d,"type":"private"},"from":{"id":%d,"is_bot":false,"first_name":"x"},"web_app_data":{"data":"чужое","button_text":"x"}}}`, stranger, stranger))
+
+	waitFor(t, func() bool {
+		h.mu.Lock()
+		defer h.mu.Unlock()
+		return h.settings == 1 && len(h.webapp) == 1
+	})
+	time.Sleep(50 * time.Millisecond)
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	if h.webapp[0] != `{"v":1}` || h.nonText != 0 || len(h.webapp) != 1 {
+		t.Errorf("h = %+v", h)
+	}
+}
+
+func TestSendWebAppAndSetup(t *testing.T) {
+	b, srv, _, _ := setup(t)
+	ctx := context.Background()
+	if _, err := b.SendWebApp(ctx, "текст", "⚙️ Настройки", "https://example.test/app/#zAA"); err != nil {
+		t.Fatal(err)
+	}
+	m := srv.Calls("sendMessage")[0].Params["reply_markup"]
+	for _, want := range []string{`"keyboard"`, `"web_app":{"url":"https://example.test/app/#zAA"}`, `"is_persistent":true`} {
+		if !strings.Contains(m, want) {
+			t.Errorf("нет %s в %s", want, m)
+		}
+	}
+	if err := b.Setup(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if c := srv.Calls("setMyCommands")[0].Params["commands"]; !strings.Contains(c, `"settings"`) {
+		t.Errorf("команды: %s", c)
+	}
+	if len(Description) > 512 || len([]rune(ShortDescription)) > 120 {
+		t.Error("тексты профиля длиннее лимитов Telegram")
+	}
+	for _, m := range []string{"setMyDescription", "setMyShortDescription", "setChatMenuButton"} {
+		if len(srv.Calls(m)) != 1 {
+			t.Errorf("%s не вызван", m)
+		}
 	}
 }

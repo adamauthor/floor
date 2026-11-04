@@ -38,6 +38,7 @@ type fakeTG struct {
 	msgs    []sent
 	edits   []sent
 	pins    []int
+	webapps []sent // сообщения с кнопкой настроек; в buttons — адрес
 	typing  int
 	sendErr error
 	editErr error
@@ -70,6 +71,17 @@ func (f *fakeTG) Pin(_ context.Context, id int) error {
 	defer f.mu.Unlock()
 	f.pins = append(f.pins, id)
 	return nil
+}
+
+func (f *fakeTG) SendWebApp(_ context.Context, text, label, url string) (int, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.sendErr != nil {
+		return 0, f.sendErr
+	}
+	f.nextID++
+	f.webapps = append(f.webapps, sent{f.nextID, text, []Button{{Text: label, Data: url}}})
+	return f.nextID, nil
 }
 
 func (f *fakeTG) Typing(context.Context) error {

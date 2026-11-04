@@ -138,6 +138,36 @@ func Load(path, today string) ([]byte, File, error) {
 	return raw, f, err
 }
 
+// Save проверяет и атомарно записывает файл: читатель не увидит его наполовину.
+func Save(path string, f File) error {
+	if err := f.Validate(); err != nil {
+		return err
+	}
+	raw, err := Encode(f)
+	if err != nil {
+		return err
+	}
+	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+		return fmt.Errorf("создание каталога: %w", err)
+	}
+	tmp, err := os.CreateTemp(filepath.Dir(path), ".habits-*.json")
+	if err != nil {
+		return fmt.Errorf("запись файла: %w", err)
+	}
+	defer os.Remove(tmp.Name())
+	if _, err := tmp.Write(raw); err != nil {
+		tmp.Close()
+		return fmt.Errorf("запись файла: %w", err)
+	}
+	if err := tmp.Close(); err != nil {
+		return fmt.Errorf("запись файла: %w", err)
+	}
+	if err := os.Rename(tmp.Name(), path); err != nil {
+		return fmt.Errorf("запись файла: %w", err)
+	}
+	return nil
+}
+
 // Encode форматирует файл для чтения человеком.
 func Encode(f File) ([]byte, error) {
 	var b strings.Builder

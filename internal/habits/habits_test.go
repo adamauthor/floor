@@ -122,3 +122,23 @@ func TestAnchorText(t *testing.T) {
 		t.Errorf("got %q", got)
 	}
 }
+
+func TestSaveAtomicAndValidated(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "sub", "habits.json")
+	f := Defaults("2026-11-04")
+	if err := Save(path, f); err != nil {
+		t.Fatal(err)
+	}
+	_, back, err := Load(path, "2026-11-04")
+	if err != nil || len(back.Habits) != 4 {
+		t.Fatalf("%+v, %v", back, err)
+	}
+	f.Habits[0].Anchor = ""
+	if err := Save(path, f); err == nil {
+		t.Error("неверный файл записан")
+	}
+	entries, _ := os.ReadDir(filepath.Dir(path))
+	if len(entries) != 1 {
+		t.Errorf("остались временные файлы: %v", entries)
+	}
+}

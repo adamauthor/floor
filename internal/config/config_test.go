@@ -82,3 +82,24 @@ func TestLoadLocalWithoutSecrets(t *testing.T) {
 		t.Fatalf("LoadLocal не должен требовать секреты: %v", err)
 	}
 }
+
+func TestSettingsApply(t *testing.T) {
+	c := Config{}
+	s := Settings{WakeAnchor: "09:30", Tolerance: 45, StepsFloor: 5000, StepsGoal: 8000, EveningAt: "22:15", WeeklyAt: "19:00"}
+	if err := s.Apply(&c); err != nil {
+		t.Fatal(err)
+	}
+	if c.Settings() != s {
+		t.Errorf("туда-обратно: %+v", c.Settings())
+	}
+	for _, bad := range []Settings{
+		{WakeAnchor: "9", Tolerance: 45, StepsFloor: 5000, StepsGoal: 8000, EveningAt: "22:15", WeeklyAt: "19:00"},
+		{WakeAnchor: "09:30", Tolerance: 5, StepsFloor: 5000, StepsGoal: 8000, EveningAt: "22:15", WeeklyAt: "19:00"},
+		{WakeAnchor: "09:30", Tolerance: 45, StepsFloor: 9000, StepsGoal: 8000, EveningAt: "22:15", WeeklyAt: "19:00"},
+	} {
+		before := c
+		if err := bad.Apply(&c); err == nil || c != before {
+			t.Errorf("%+v: err = %v, конфигурация изменилась: %v", bad, err, c != before)
+		}
+	}
+}

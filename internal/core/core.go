@@ -39,6 +39,8 @@ type Messenger interface {
 	Edit(ctx context.Context, msgID int, text string) error
 	Pin(ctx context.Context, msgID int) error
 	Typing(ctx context.Context) error
+	// SendWebApp отправляет сообщение и ставит под полем ввода кнопку страницы настроек.
+	SendWebApp(ctx context.Context, text, label, url string) (int, error)
 }
 
 const (
@@ -65,6 +67,7 @@ type App struct {
 	Now   func() time.Time
 
 	tickMu   sync.Mutex // один тик за раз: /start и расписание не должны отправить дважды
+	cfgMu    sync.RWMutex
 	mu       sync.Mutex
 	backoff  schedule.Backoff
 	habits   habits.File
@@ -73,7 +76,7 @@ type App struct {
 }
 
 func (a *App) rules() render.Rules {
-	return render.Rules{WakeTolerance: a.Cfg.WakeToleranceMin, StepsFloor: a.Cfg.StepsFloor, StepsGoal: a.Cfg.StepsGoal}
+	return render.Rules{WakeTolerance: a.conf().WakeToleranceMin, StepsFloor: a.conf().StepsFloor, StepsGoal: a.conf().StepsGoal}
 }
 
 func (a *App) location(ctx context.Context) *time.Location {
@@ -81,7 +84,7 @@ func (a *App) location(ctx context.Context) *time.Location {
 	if err != nil {
 		a.Log.Warn("tz_read_failed", "error", err)
 	}
-	return schedule.Location(offset, a.Cfg.DefaultTZ)
+	return schedule.Location(offset, a.conf().DefaultTZ)
 }
 
 // Apply применяет выгрузку. Идемпотентна: повтор той же выгрузки ничего не меняет.
@@ -167,7 +170,7 @@ func (a *App) recomputeSleep(ctx context.Context, exp health.Export, now time.Ti
 		if !ok {
 			continue
 		}
-		delta := metrics.WakeDelta(n.WakeAt, date, a.Cfg.WakeAnchor)
+		delta := metrics.WakeDelta(n.WakeAt, date, a.conf().WakeAnchor)
 		if err := a.Store.SetSleep(ctx, date, exp.TZOffset, n.Minutes, n.WakeAt, delta, now); err != nil {
 			return 0, err
 		}
@@ -188,7 +191,7 @@ func (a *App) replaceSleep(ctx context.Context, exp health.Export, now time.Time
 			}
 			continue
 		}
-		delta := metrics.WakeDelta(night.WakeAt, date, a.Cfg.WakeAnchor)
+		delta := metrics.WakeDelta(night.WakeAt, date, a.conf().WakeAnchor)
 		if err := a.Store.SetSleep(ctx, date, exp.TZOffset, night.Minutes, night.WakeAt, delta, now); err != nil {
 			return n, err
 		}
@@ -215,6 +218,7 @@ func (a *App) Tick(ctx context.Context, t time.Time) {
 
 	err := errors.Join(
 		a.syncHabits(ctx, local),
+		a.syncSettingsButton(ctx, local),
 		a.morning(ctx, local),
 		a.evening(ctx, local),
 		a.weekly(ctx, local),
@@ -248,7 +252,7 @@ func (a *App) cleanup(ctx context.Context, local time.Time) {
 // currentHabits читает файл привычек. При ошибке остаётся последняя рабочая версия,
 // а если её нет — стартовый набор: бот не должен молчать из-за опечатки в файле.
 func (a *App) currentHabits(ctx context.Context, today string) habits.File {
-	raw, f, err := habits.Load(a.Cfg.HabitsFile, today)
+	raw, f, err := habits.Load(a.conf().HabitsFile, today)
 	if err != nil {
 		a.Log.Warn("habits_invalid", "error", err)
 		a.notifyBadHabits(ctx, raw, err)
@@ -297,7 +301,7 @@ func shortHash(s string) string {
 func (a *App) syncHabits(ctx context.Context, local time.Time) error {
 	today := local.Format(time.DateOnly)
 	f := a.currentHabits(ctx, today)
-	card := render.HabitCard(f.Active(), f.FloorLabels(), today, a.Cfg.WakeAnchor.String())
+	card := render.HabitCard(f.Active(), f.FloorLabels(), today, a.conf().WakeAnchor.String())
 	hash := shortHash(card)
 
 	stored, err := a.Store.GetKV(ctx, kvPinnedHash)
@@ -344,7 +348,7 @@ func (a *App) morning(ctx context.Context, local time.Time) error {
 	if err != nil {
 		return err
 	}
-	if day.MorningSentAt != nil || !schedule.MorningDue(local, a.Cfg.WakeAnchor, day.WakeAt) {
+	if day.MorningSentAt != nil || !schedule.MorningDue(local, a.conf().WakeAnchor, day.WakeAt) {
 		return nil
 	}
 	yesterday, err := a.Store.GetDay(ctx, metrics.AddDays(date, -1))
@@ -387,7 +391,7 @@ func (a *App) stepOfDay(ctx context.Context, date string) string {
 }
 
 func (a *App) evening(ctx context.Context, local time.Time) error {
-	date, due := schedule.EveningDate(local, a.Cfg.EveningAt)
+	date, due := schedule.EveningDate(local, a.conf().EveningAt)
 	if !due {
 		return nil
 	}
@@ -412,7 +416,7 @@ func (a *App) evening(ctx context.Context, local time.Time) error {
 }
 
 func (a *App) weekly(ctx context.Context, local time.Time) error {
-	key, due := schedule.WeeklyKey(local, a.Cfg.WeeklyAt)
+	key, due := schedule.WeeklyKey(local, a.conf().WeeklyAt)
 	if !due {
 		return nil
 	}
@@ -440,7 +444,7 @@ func (a *App) weekly(ctx context.Context, local time.Time) error {
 	f := a.currentHabits(ctx, today)
 	text := render.Weekly(render.WeeklyData{
 		Monday: key, Today: today, Days: plainDays(week), Habits: f.Active(),
-		Wake: a.Cfg.WakeAnchor.String(), Summary: summary,
+		Wake: a.conf().WakeAnchor.String(), Summary: summary,
 	}, a.rules())
 	if _, err := a.TG.Send(ctx, text, nil); err != nil {
 		return fmt.Errorf("неделя: %w", err)
@@ -464,12 +468,12 @@ func (a *App) promptContext(ctx context.Context, today string, n int) (table, hs
 		return "", "", err
 	}
 	f := a.currentHabits(ctx, today)
-	return render.ContextTable(plainDays(days)), render.HabitsContext(f.Active(), today, a.Cfg.WakeAnchor.String()), nil
+	return render.ContextTable(plainDays(days)), render.HabitsContext(f.Active(), today, a.conf().WakeAnchor.String()), nil
 }
 
 // ask вызывает Claude с учётом дневного лимита; false — использовать fallback.
 func (a *App) ask(ctx context.Context, date, prompt, scenario string) (string, bool) {
-	allowed, err := a.Store.TakeLLMCall(ctx, date, a.Cfg.LLMMaxCallsPerDay)
+	allowed, err := a.Store.TakeLLMCall(ctx, date, a.conf().LLMMaxCallsPerDay)
 	if err != nil || !allowed {
 		a.Log.Warn("llm_fallback", "scenario", scenario, "reason", "limit", "error", err)
 		return "", false
@@ -636,10 +640,10 @@ func (a *App) DebugDay(ctx context.Context, date string) (string, error) {
 	if !d.Exists {
 		b.WriteString("в базе нет записи за этот день\n")
 	}
-	fmt.Fprintf(&b, "якорь        %s (допуск ±%d мин)\n", a.Cfg.WakeAnchor, a.Cfg.WakeToleranceMin)
+	fmt.Fprintf(&b, "якорь        %s (допуск ±%d мин)\n", a.conf().WakeAnchor, a.conf().WakeToleranceMin)
 	if d.WakeAt != nil && d.WakeDeltaMin != nil {
 		fmt.Fprintf(&b, "подъём       %s (%+d мин, в норме: %v)\n", d.WakeAt.Format("15:04 -07:00"), *d.WakeDeltaMin,
-			metrics.InNorm(*d.WakeDeltaMin, a.Cfg.WakeToleranceMin))
+			metrics.InNorm(*d.WakeDeltaMin, a.conf().WakeToleranceMin))
 	} else {
 		b.WriteString("подъём       нет данных\n")
 	}
@@ -649,7 +653,7 @@ func (a *App) DebugDay(ctx context.Context, date string) (string, error) {
 		b.WriteString("сон          нет данных\n")
 	}
 	if d.Steps != nil {
-		fmt.Fprintf(&b, "шаги         %d (пол %d, цель %d)\n", *d.Steps, a.Cfg.StepsFloor, a.Cfg.StepsGoal)
+		fmt.Fprintf(&b, "шаги         %d (пол %d, цель %d)\n", *d.Steps, a.conf().StepsFloor, a.conf().StepsGoal)
 	} else {
 		b.WriteString("шаги         нет данных\n")
 	}

@@ -12,7 +12,7 @@ import (
 
 // Окна из раздела 8: после них сообщение не досылается.
 const (
-	morningCloseHour = 14
+	morningWindow    = 7 * time.Hour // утро ждёт до якоря + 7 часов: при 07:00 — до 14:00
 	eveningCloseHour = 3
 	morningDelay     = 30 * time.Minute // пауза после подъёма перед сводкой
 	morningFallback  = 3 * time.Hour    // сводка без данных: якорь + 3 часа
@@ -30,10 +30,19 @@ func at(now time.Time, c config.Clock) time.Time {
 	return time.Date(now.Year(), now.Month(), now.Day(), c.Hour, c.Minute, 0, 0, now.Location())
 }
 
+// morningClose — когда утреннее окно закрывается: не позже конца суток.
+func morningClose(now time.Time, anchor config.Clock) time.Time {
+	end := time.Date(now.Year(), now.Month(), now.Day(), 23, 59, 0, 0, now.Location())
+	if c := at(now, anchor).Add(morningWindow); c.Before(end) {
+		return c
+	}
+	return end
+}
+
 // MorningDue — пора ли слать утреннюю сводку. now — местное время.
 // wakeAt учитывается, только если подъём случился сегодня по местной дате.
 func MorningDue(now time.Time, anchor config.Clock, wakeAt *time.Time) bool {
-	if now.Hour() >= morningCloseHour {
+	if !now.Before(morningClose(now, anchor)) {
 		return false
 	}
 	if wakeAt != nil {

@@ -20,6 +20,8 @@ type Handler interface {
 	OnText(ctx context.Context, text string)
 	OnNonText(ctx context.Context)
 	OnStart(ctx context.Context)
+	OnSettings(ctx context.Context)
+	OnWebAppData(ctx context.Context, data string)
 }
 
 // Bot — клиент Telegram для одного владельца.
@@ -100,9 +102,15 @@ func (b *Bot) onMessage(ctx context.Context, m *models.Message) {
 	if m.PinnedMessage != nil {
 		return // служебное сообщение о закреплении
 	}
+	if m.WebAppData != nil {
+		b.handler.OnWebAppData(ctx, m.WebAppData.Data)
+		return
+	}
 	switch text := strings.TrimSpace(m.Text); {
 	case text == "/start":
 		b.handler.OnStart(ctx)
+	case text == "/settings":
+		b.handler.OnSettings(ctx)
 	case text == "":
 		b.handler.OnNonText(ctx)
 	default:
@@ -126,6 +134,46 @@ func (b *Bot) Send(ctx context.Context, text string, buttons []core.Button) (int
 	}
 	return msg.ID, nil
 }
+
+// SendWebApp отправляет сообщение и ставит постоянную кнопку страницы под полем ввода.
+// Только такая кнопка позволяет странице вернуть данные через sendData.
+func (b *Bot) SendWebApp(ctx context.Context, text, label, url string) (int, error) {
+	msg, err := b.api.SendMessage(ctx, &tg.SendMessageParams{
+		ChatID: b.owner, Text: text, ParseMode: models.ParseModeHTML,
+		ReplyMarkup: models.ReplyKeyboardMarkup{
+			Keyboard:       [][]models.KeyboardButton{{{Text: label, WebApp: &models.WebAppInfo{URL: url}}}},
+			IsPersistent:   true,
+			ResizeKeyboard: true,
+		},
+	})
+	if err != nil {
+		return 0, b.scrub(err)
+	}
+	return msg.ID, nil
+}
+
+// Setup оформляет бота: меню команд и тексты профиля. Повтор безопасен.
+func (b *Bot) Setup(ctx context.Context) error {
+	_, err1 := b.api.SetMyCommands(ctx, &tg.SetMyCommandsParams{Commands: []models.BotCommand{
+		{Command: "settings", Description: "Привычки, время и шаги"},
+	}})
+	_, err2 := b.api.SetMyShortDescription(ctx, &tg.SetMyShortDescriptionParams{ShortDescription: ShortDescription})
+	_, err3 := b.api.SetMyDescription(ctx, &tg.SetMyDescriptionParams{Description: Description})
+	_, err4 := b.api.SetChatMenuButton(ctx, &tg.SetChatMenuButtonParams{
+		MenuButton: models.MenuButtonCommands{Type: models.MenuButtonTypeCommands},
+	})
+	return b.scrub(errors.Join(err1, err2, err3, err4))
+}
+
+// Тексты профиля бота.
+const (
+	ShortDescription = "Минимальный уровень дня, который держится даже в плохой день. Без стриков и стыда."
+	Description      = "Floor держит пол дня — минимум, который выполним даже в плохой день.\n\n" +
+		"☀️ Утром: подъём, сон, шаги и один шаг на сегодня.\n" +
+		"🌙 Вечером: один вопрос и одна кнопка.\n" +
+		"📅 В воскресенье: итог недели.\n\n" +
+		"Привычки, время и шаги — кнопка «⚙️ Настройки»."
+)
 
 // Edit заменяет текст сообщения и убирает кнопки.
 func (b *Bot) Edit(ctx context.Context, msgID int, text string) error {

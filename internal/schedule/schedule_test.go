@@ -152,3 +152,21 @@ func TestRun(t *testing.T) {
 		t.Errorf("вызовов = %d", calls)
 	}
 }
+
+func TestMorningWindowFollowsAnchor(t *testing.T) {
+	loc := time.FixedZone("+05:00", 5*3600)
+	at := func(s string) time.Time {
+		v, _ := time.ParseInLocation("2006-01-02 15:04", s, loc)
+		return v
+	}
+	late := config.Clock{Hour: 12}
+	if !MorningDue(at("2026-11-04 15:00"), late, nil) {
+		t.Error("при якоре 12:00 утро без данных должно прийти в 15:00")
+	}
+	if MorningDue(at("2026-11-04 19:00"), late, nil) {
+		t.Error("окно при якоре 12:00 закрывается в 19:00")
+	}
+	if !MorningDue(at("2026-11-04 23:30"), config.Clock{Hour: 20}, nil) {
+		t.Error("окно не должно переходить через полночь, но до 23:59 открыто")
+	}
+}
