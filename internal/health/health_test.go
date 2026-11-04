@@ -136,12 +136,18 @@ func TestFileSource(t *testing.T) {
 		t.Fatal(err)
 	}
 
+	// Файл подменяется целиком с уже выставленным mtime: иначе опрос может
+	// увидеть его между записью и Chtimes и запомнить текущее время.
 	write := func(body string, mod time.Time) {
 		t.Helper()
-		if err := os.WriteFile(path, []byte(body), 0o600); err != nil {
+		tmp := path + ".tmp"
+		if err := os.WriteFile(tmp, []byte(body), 0o600); err != nil {
 			t.Fatal(err)
 		}
-		if err := os.Chtimes(path, mod, mod); err != nil {
+		if err := os.Chtimes(tmp, mod, mod); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.Rename(tmp, path); err != nil {
 			t.Fatal(err)
 		}
 	}
