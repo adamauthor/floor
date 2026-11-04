@@ -26,10 +26,26 @@ type Habit struct {
 	Floor  string `json:"floor"`  // пол: минимум, который выполним даже в плохой день
 	Since  string `json:"since"`  // YYYY-MM-DD, от неё считаются недели
 	Paused bool   `json:"paused,omitempty"`
-	Auto   bool   `json:"auto,omitempty"` // на автомате: выпущена с карточки, бот о ней не спрашивает
+	Auto   bool   `json:"auto,omitempty"`   // на автомате: выпущена с карточки, бот о ней не спрашивает
+	Queued bool   `json:"queued,omitempty"` // в очереди: запустится, когда пол держится и есть место
+
+	Kind    string `json:"kind,omitempty"`     // daily (по умолчанию) или workout
+	PerWeek int    `json:"per_week,omitempty"` // цель на неделю для workout, 1–7
 
 	OldFloor string `json:"floor_label,omitempty"` // прежнее имя поля, Parse переносит его в Floor
 }
+
+// Виды привычек.
+const (
+	KindDaily   = "daily"
+	KindWorkout = "workout"
+)
+
+// Weekly — привычка с недельной целью: засчитывается тренировками, а не вечерней отметкой.
+func (h Habit) Weekly() bool { return h.Kind == KindWorkout }
+
+// WeekFloor — пол недели для недельной привычки: на одну меньше цели.
+func (h Habit) WeekFloor() int { return max(1, h.PerWeek-1) }
 
 // File — содержимое habits.json.
 type File struct {
@@ -111,7 +127,16 @@ func (f File) Validate() error {
 		if _, err := time.Parse(time.DateOnly, h.Since); err != nil {
 			errs = append(errs, fmt.Errorf("%s: since должен быть в виде YYYY-MM-DD", label))
 		}
-		if !h.Paused && !h.Auto {
+		switch h.Kind {
+		case "", KindDaily:
+		case KindWorkout:
+			if h.PerWeek < 1 || h.PerWeek > 7 {
+				errs = append(errs, fmt.Errorf("%s: per_week должен быть 1–7", label))
+			}
+		default:
+			errs = append(errs, fmt.Errorf("%s: неизвестный kind %q", label, h.Kind))
+		}
+		if !h.Paused && !h.Auto && !h.Queued {
 			active++
 		}
 	}
@@ -199,11 +224,44 @@ func (h *Habit) migrate() {
 	h.OldFloor = ""
 }
 
-// Active — привычки в работе: без паузы и не выпущенные на автомат, в порядке файла.
+// Active — привычки в работе: без паузы, не на автомате и не в очереди, в порядке файла.
 func (f File) Active() []Habit {
 	out := make([]Habit, 0, len(f.Habits))
 	for _, h := range f.Habits {
-		if !h.Paused && !h.Auto {
+		if !h.Paused && !h.Auto && !h.Queued {
+			out = append(out, h)
+		}
+	}
+	return out
+}
+
+// Daily — активные привычки с вечерней отметкой, начатые к дате: только они входят в пол дня.
+func (f File) Daily(date string) []Habit {
+	var out []Habit
+	for _, h := range f.Active() {
+		if !h.Weekly() && h.Since <= date {
+			out = append(out, h)
+		}
+	}
+	return out
+}
+
+// WeeklyHabits — активные недельные привычки.
+func (f File) WeeklyHabits() []Habit {
+	var out []Habit
+	for _, h := range f.Active() {
+		if h.Weekly() {
+			out = append(out, h)
+		}
+	}
+	return out
+}
+
+// Queue — привычки в очереди, в порядке файла.
+func (f File) Queue() []Habit {
+	var out []Habit
+	for _, h := range f.Habits {
+		if h.Queued && !h.Paused {
 			out = append(out, h)
 		}
 	}
@@ -214,7 +272,7 @@ func (f File) Active() []Habit {
 func (f File) Automatic() []Habit {
 	var out []Habit
 	for _, h := range f.Habits {
-		if h.Auto && !h.Paused {
+		if h.Auto && !h.Paused && !h.Queued {
 			out = append(out, h)
 		}
 	}

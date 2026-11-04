@@ -19,6 +19,7 @@ import (
 	"floor/internal/health"
 	"floor/internal/llm"
 	"floor/internal/metrics"
+	"floor/internal/money"
 	"floor/internal/render"
 	"floor/internal/schedule"
 	"floor/internal/store"
@@ -84,6 +85,8 @@ type App struct {
 	mu       sync.Mutex
 	backoff  schedule.Backoff
 	habits   habits.File
+	money    money.File // последняя рабочая версия плана денег
+	moneyOK  bool
 	stepDate string
 	stepText string
 }
@@ -123,8 +126,21 @@ func (a *App) Apply(ctx context.Context, exp health.Export) error {
 	if err != nil {
 		return err
 	}
+	for _, w := range exp.Workouts {
+		source := w.Source
+		if source != "google" && a.conf().HealthSource == "http" {
+			source = "http"
+		}
+		start := w.Start
+		err := a.Store.UpsertWorkout(ctx, store.Workout{
+			ID: w.ID, Date: start.Format(time.DateOnly), Start: &start, Minutes: w.Minutes, Type: w.Type, Source: source,
+		})
+		if err != nil {
+			return err
+		}
+	}
 	a.Log.Info("export_applied", "bytes", len(exp.Raw), "steps_days", len(exp.Steps),
-		"sleep_samples", len(exp.Sleep), "nights", nights)
+		"sleep_samples", len(exp.Sleep), "nights", nights, "workouts", len(exp.Workouts))
 	return nil
 }
 
@@ -236,6 +252,7 @@ func (a *App) Tick(ctx context.Context, t time.Time) {
 		a.evening(ctx, local),
 		a.weekly(ctx, local),
 		a.dataGap(ctx, local),
+		a.moneyTick(ctx, local),
 	)
 
 	a.mu.Lock()
@@ -315,7 +332,7 @@ func shortHash(s string) string {
 func (a *App) syncHabits(ctx context.Context, local time.Time) error {
 	today := local.Format(time.DateOnly)
 	f := a.currentHabits(ctx, today)
-	card := render.HabitCard(f, today, a.conf().WakeAnchor.String())
+	card := render.HabitCard(f, today, a.conf().WakeAnchor.String(), a.weekCounts(ctx, today, f))
 	hash := shortHash(card)
 
 	stored, err := a.Store.GetKV(ctx, kvPinnedHash)
@@ -374,6 +391,15 @@ func (a *App) morning(ctx context.Context, local time.Time) error {
 		step = a.stepOfDay(ctx, date)
 	}
 	data := render.MorningData{Date: date, StepsYesterday: yesterday.Steps, Step: step}
+	data.Extra = a.workoutLines(ctx, date, a.currentHabits(ctx, date))
+	if metrics.Monday(date) == date {
+		if block := a.learningBlock(ctx, date); block != "" {
+			data.Extra = append(data.Extra, block)
+		}
+	}
+	if line := a.moneyGoalToday(ctx, date); line != "" {
+		data.Extra = append(data.Extra, line)
+	}
 	if day.WakeAt != nil && day.WakeAt.In(local.Location()).Format(time.DateOnly) == date {
 		data.WakeAt, data.WakeDeltaMin, data.SleepMinutes = day.WakeAt, day.WakeDeltaMin, day.SleepMinutes
 	}
@@ -420,8 +446,8 @@ func (a *App) evening(ctx context.Context, local time.Time) error {
 	if day.EveningSentAt != nil {
 		return nil
 	}
-	active := a.currentHabits(ctx, date).Active()
-	id, err := a.TG.SendRows(ctx, render.Evening(active, a.conf().WakeAnchor.String()), markRows(date, active, nil))
+	text, rows := a.eveningView(ctx, date, a.currentHabits(ctx, date), nil)
+	id, err := a.TG.SendRows(ctx, text, rows)
 	if err != nil {
 		return fmt.Errorf("вечер: %w", err)
 	}
@@ -471,6 +497,7 @@ func (a *App) weekly(ctx context.Context, local time.Time) error {
 	// Дальше — необязательное: сбой не должен повторять саму сводку.
 	a.shareWeekly(ctx, data)
 	a.sendReview(ctx, key, f)
+	a.queueOffer(ctx, local, f)
 	a.monthly(ctx, local, f)
 	return nil
 }
@@ -494,8 +521,15 @@ func (a *App) promptContext(ctx context.Context, today string, n int) (table, hs
 	if err != nil {
 		return "", "", err
 	}
-	return render.ContextTable(plainDays(days), f.Active(), levels(marks)),
-		render.HabitsContext(f.Active(), today, a.conf().WakeAnchor.String()), nil
+	table = render.ContextTable(plainDays(days), f.Active(), levels(marks), a.trainingDays(ctx, metrics.AddDays(today, 1-n), today))
+	// Блоки 2.0: деньги и тема недели, если есть. Цифры для Claude — только отсюда.
+	if r, mf := a.lastReport(ctx, today); r != nil {
+		table += "\n" + render.MoneyContext(*r, mf)
+	}
+	if w, ok := a.learningWeek(ctx, today); ok {
+		table += fmt.Sprintf("\nТема недели (финграмотность, неделя %d из %d): %s. Действие: %s\n", w.Index+1, w.Total, w.Topic.Title, w.Topic.Action)
+	}
+	return table, render.HabitsContext(f.Active(), today, a.conf().WakeAnchor.String()), nil
 }
 
 // ask вызывает Claude с учётом дневного лимита; false — использовать fallback.
@@ -523,6 +557,10 @@ func (a *App) OnCallback(ctx context.Context, data string, msgID int) string {
 		return a.onMark(ctx, strings.TrimPrefix(data, callbackMark), msgID)
 	case strings.HasPrefix(data, callbackWeek):
 		return a.onReview(ctx, strings.TrimPrefix(data, callbackWeek), msgID)
+	case strings.HasPrefix(data, callbackQueue):
+		return a.onQueue(ctx, strings.TrimPrefix(data, callbackQueue), msgID)
+	case strings.HasPrefix(data, callbackMoney):
+		return a.onMoney(ctx, strings.TrimPrefix(data, callbackMoney), msgID)
 	case strings.HasPrefix(data, callbackMonth):
 		return a.onMonthly(ctx, strings.TrimPrefix(data, callbackMonth), msgID)
 	}
@@ -603,6 +641,11 @@ func (a *App) OnNonText(ctx context.Context) {
 
 // OnText отвечает на свободный текст с контекстом 14 дней и последних 20 реплик.
 func (a *App) OnText(ctx context.Context, text string) {
+	// Номера карт и счетов не сохраняются нигде: ни в истории, ни в промпте.
+	text = money.Scrub(text)
+	if a.onMoneyText(ctx, text) {
+		return
+	}
 	now := a.Now()
 	if err := a.Store.AddMessage(ctx, "user", text, now); err != nil {
 		a.Log.Warn("message_save_failed", "error", err)

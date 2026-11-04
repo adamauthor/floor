@@ -440,6 +440,10 @@ func (s *Store) Cleanup(ctx context.Context, now time.Time) error {
 		now.Add(-MessagesRetention).UTC().Format(time.RFC3339)); err != nil {
 		return fmt.Errorf("очистка сообщений: %w", err)
 	}
+	if _, err := s.db.ExecContext(ctx, `DELETE FROM money_pending WHERE created_at < ?`,
+		now.Add(-PendingTTL).UTC().Format(time.RFC3339)); err != nil {
+		return fmt.Errorf("очистка сверок: %w", err)
+	}
 	cutoff := llmCallsPrefix + now.AddDate(0, 0, -2).Format(time.DateOnly)
 	if _, err := s.db.ExecContext(ctx, `DELETE FROM kv WHERE key LIKE ? AND key < ?`,
 		llmCallsPrefix+"%", cutoff); err != nil {

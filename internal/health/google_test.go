@@ -33,10 +33,16 @@ const googleSleepResp = `{"dataPoints":[
  {"sleep":{"interval":{"startTime":"2026-11-03T09:00:00Z","endTime":"2026-11-03T09:40:00Z"}}}
 ]}`
 
+const googleExerciseResp = `{"dataPoints":[
+ {"name":"users/me/dataTypes/exercise/dataPoints/run1","exercise":{"interval":{"startTime":"2026-11-03T13:00:00Z","endTime":"2026-11-03T13:55:00Z","startUtcOffset":"18000s","endUtcOffset":"18000s"},"exerciseType":"RUNNING","activeDuration":"3120s"}},
+ {"name":"users/me/dataTypes/exercise/dataPoints/walk","exercise":{"interval":{"startTime":"2026-11-04T02:00:00Z","endTime":"2026-11-04T02:10:00Z"},"exerciseType":"WALKING","activeDuration":"600s"}}
+]}`
+
 type fakeGoogle struct {
-	status  atomic.Int32
-	filters atomic.Value
-	bodies  atomic.Value
+	exerciseFails atomic.Bool
+	status        atomic.Int32
+	filters       atomic.Value
+	bodies        atomic.Value
 }
 
 func (f *fakeGoogle) handler(t *testing.T) http.Handler {
@@ -54,6 +60,12 @@ func (f *fakeGoogle) handler(t *testing.T) http.Handler {
 		case r.Method == http.MethodGet && r.URL.Path == "/v4/users/me/dataTypes/sleep/dataPoints":
 			f.filters.Store(r.URL.Query().Get("filter"))
 			_, _ = io.WriteString(w, googleSleepResp)
+		case r.Method == http.MethodGet && r.URL.Path == "/v4/users/me/dataTypes/exercise/dataPoints":
+			if f.exerciseFails.Load() {
+				w.WriteHeader(http.StatusBadRequest)
+				return
+			}
+			_, _ = io.WriteString(w, googleExerciseResp)
 		default:
 			t.Errorf("неожиданный запрос %s %s", r.Method, r.URL.Path)
 			w.WriteHeader(http.StatusNotFound)
@@ -224,5 +236,36 @@ func TestGoogleClientWithoutToken(t *testing.T) {
 	_, err := src.Fetch(context.Background())
 	if !errors.Is(err, ErrGoogleAuth) {
 		t.Errorf("без файла токена ожидается ErrGoogleAuth, получено %v", err)
+	}
+}
+
+func TestGoogleWorkouts(t *testing.T) {
+	f := &fakeGoogle{}
+	exp, err := newGoogleSource(t, f).Fetch(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(exp.Workouts) != 2 {
+		t.Fatalf("тренировки: %+v", exp.Workouts)
+	}
+	w := exp.Workouts[0]
+	if w.ID != "users/me/dataTypes/exercise/dataPoints/run1" || w.Minutes != 52 || w.Type != "RUNNING" ||
+		w.Source != "google" || w.Start.Format(time.RFC3339) != "2026-11-03T18:00:00+05:00" {
+		t.Errorf("тренировка: %+v", w)
+	}
+	// Сбой тренировок не ломает шаги и сон.
+	f.exerciseFails.Store(true)
+	exp, err = newGoogleSource(t, f).Fetch(context.Background())
+	if err != nil || len(exp.Steps) != 2 || len(exp.Workouts) != 0 {
+		t.Errorf("без тренировок: %v, %+v", err, exp)
+	}
+}
+
+func TestParseWorkoutsFromFile(t *testing.T) {
+	exp, err := Parse([]byte(`{"schema":1,"generated_at":"2026-11-04T20:00:00+05:00","steps":[],"sleep":[],
+		"workouts":[{"start":"2026-11-04T18:00:00+05:00","end":"2026-11-04T18:40:00+05:00","type":"бокс"},
+		{"start":"плохо","end":"2026-11-04T18:40:00+05:00"}]}`))
+	if err != nil || len(exp.Workouts) != 1 || exp.Workouts[0].Minutes != 40 || exp.Workouts[0].Source != "file" {
+		t.Fatalf("%v %+v", err, exp.Workouts)
 	}
 }

@@ -97,7 +97,7 @@ func ReturnStep(h habits.Habit, wake string) string {
 }
 
 // habitRows — строки недельной таблицы по привычкам: ● цель, ○ пол, ✕ мимо, · нет отметки.
-func habitRows(days []metrics.Day, today string, hs []habits.Habit, marks map[string]map[string]int) []string {
+func habitRows(days []metrics.Day, today string, hs []habits.Habit, marks map[string]map[string]int, training map[string]int) []string {
 	var out []string
 	for _, h := range hs {
 		label := h.Title
@@ -105,6 +105,19 @@ func habitRows(days []metrics.Day, today string, hs []habits.Habit, marks map[st
 			label = string([]rune(label)[:6]) + "."
 		}
 		row := label + strings.Repeat(" ", 8-utf8.RuneCountInString(label))
+		if h.Weekly() {
+			done := 0
+			for _, d := range days {
+				if training[d.Date] > 0 {
+					row += cell("●")
+					done++
+				} else {
+					row += cell("·")
+				}
+			}
+			out = append(out, html.EscapeString(strings.TrimRight(row, " ")+"  "+weekResult(h, done)))
+			continue
+		}
 		for _, d := range days {
 			level, ok := marks[d.Date][h.ID]
 			switch {

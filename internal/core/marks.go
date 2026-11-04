@@ -2,7 +2,6 @@ package core
 
 import (
 	"context"
-	"errors"
 	"strings"
 	"time"
 
@@ -33,12 +32,34 @@ func levels(in map[string]store.Marks) map[string]map[string]int {
 	return out
 }
 
-// markRows — кнопки вечерней отметки: по привычке в ряд и ряд «Всё на полу · Готово».
-func markRows(date string, active []habits.Habit, marks store.Marks) [][]Button {
-	rows := make([][]Button, 0, len(active)+1)
+// eveningView — текст и кнопки вечерней отметки. Недельные привычки — строкой, если
+// тренировка уже записана, иначе кнопкой «Была без часов».
+func (a *App) eveningView(ctx context.Context, date string, f habits.File, marks store.Marks) (string, [][]Button) {
+	daily := f.Daily(date)
+	text := render.Evening(daily, a.conf().WakeAnchor.String())
+	var gym []habits.Habit
+	if weekly := f.WeeklyHabits(); len(weekly) > 0 {
+		minutes := a.trainingDays(ctx, date, date)[date]
+		for _, h := range weekly {
+			if minutes > 0 {
+				text += "\n" + render.WorkoutDone(h, minutes)
+			} else {
+				gym = append(gym, h)
+			}
+		}
+	}
+	return text, markRows(date, daily, marks, gym)
+}
+
+// markRows — кнопки вечерней отметки: по привычке в ряд, «Была без часов» и ряд «Всё на полу · Готово».
+func markRows(date string, active []habits.Habit, marks store.Marks, gym []habits.Habit) [][]Button {
+	rows := make([][]Button, 0, len(active)+2)
 	for _, h := range active {
 		level, ok := marks[h.ID]
 		rows = append(rows, []Button{{Text: render.MarkButton(h, level, ok), Data: callbackMark + date + ":" + h.ID}})
+	}
+	for _, h := range gym {
+		rows = append(rows, []Button{{Text: render.HabitEmoji(h) + " Была без часов", Data: callbackMark + date + ":" + markGym}})
 	}
 	return append(rows, []Button{
 		{Text: "Всё на полу", Data: callbackMark + date + ":" + markAll},
@@ -60,7 +81,8 @@ func (a *App) onMark(ctx context.Context, rest string, msgID int) string {
 	a.markMu.Lock()
 	defer a.markMu.Unlock()
 
-	active := a.currentHabits(ctx, date).Active()
+	f := a.currentHabits(ctx, date)
+	active := f.Daily(date)
 	all, err := a.Store.MarksRange(ctx, metrics.AddDays(date, -1), date)
 	if err != nil {
 		a.Log.Error("mark_failed", "error", err)
@@ -72,6 +94,15 @@ func (a *App) onMark(ctx context.Context, rest string, msgID int) string {
 	}
 
 	switch id {
+	case markGym:
+		if err := a.manualWorkout(ctx, date, local); err != nil {
+			a.Log.Error("mark_failed", "error", err)
+			return "Не сохранилось, нажми ещё раз."
+		}
+		a.Log.Info("workout_manual", "date", date)
+		text, rows := a.eveningView(ctx, date, f, marks)
+		a.edit(ctx, msgID, text, rows)
+		return ""
 	case markAll, markDone:
 		for _, h := range active {
 			if _, ok := marks[h.ID]; !ok {
@@ -81,7 +112,7 @@ func (a *App) onMark(ctx context.Context, rest string, msgID int) string {
 				}
 			}
 		}
-		return a.finishMarks(ctx, local, date, msgID, active, marks, all[metrics.AddDays(date, -1)])
+		return a.finishMarks(ctx, local, date, msgID, f, marks, all[metrics.AddDays(date, -1)])
 	}
 
 	level, marked := marks[id]
@@ -102,16 +133,15 @@ func (a *App) onMark(ctx context.Context, rest string, msgID int) string {
 	} else {
 		marks[id] = next
 	}
-	text := render.Evening(active, a.conf().WakeAnchor.String())
-	if err := a.TG.EditRows(ctx, msgID, text, markRows(date, active, marks)); err != nil && !errors.Is(err, ErrMessageGone) {
-		a.Log.Warn("callback_edit_failed", "error", err)
-	}
+	text, rows := a.eveningView(ctx, date, f, marks)
+	a.edit(ctx, msgID, text, rows)
 	return ""
 }
 
 // finishMarks сохраняет итог дня: неотмеченное — мимо, пол дня взят, если всё хотя бы на полу.
 func (a *App) finishMarks(ctx context.Context, local time.Time, date string, msgID int,
-	active []habits.Habit, marks, yesterday store.Marks) string {
+	f habits.File, marks, yesterday store.Marks) string {
+	active := f.Daily(date)
 	status := metrics.StatusYes
 	again := make(map[string]bool)
 	for _, h := range active {
@@ -131,9 +161,13 @@ func (a *App) finishMarks(ctx context.Context, local time.Time, date string, msg
 		return "Не сохранилось, нажми ещё раз."
 	}
 	a.Log.Info("floor_marked", "date", date, "status", status)
-	if err := a.TG.Edit(ctx, msgID, render.MarksReply(active, marks, again)); err != nil && !errors.Is(err, ErrMessageGone) {
-		a.Log.Warn("callback_edit_failed", "error", err)
+	text := render.MarksReply(active, marks, again)
+	if minutes := a.trainingDays(ctx, date, date)[date]; minutes > 0 {
+		for _, h := range f.WeeklyHabits() {
+			text += "\n" + render.WorkoutDone(h, minutes)
+		}
 	}
+	a.edit(ctx, msgID, text, nil)
 	return ""
 }
 
@@ -146,7 +180,11 @@ func (a *App) returnStep(ctx context.Context, date string) string {
 		a.Log.Warn("return_step_failed", "error", err)
 		return ""
 	}
-	for _, h := range a.currentHabits(ctx, date).Active() {
+	f := a.currentHabits(ctx, date)
+	if step := a.workoutReturnStep(ctx, date, f); step != "" {
+		return step
+	}
+	for _, h := range f.Daily(yesterday) {
 		if level, ok := all[yesterday][h.ID]; ok && level == store.LevelMiss {
 			return render.ReturnStep(h, a.conf().WakeAnchor.String())
 		}

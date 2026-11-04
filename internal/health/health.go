@@ -41,6 +41,7 @@ type Export struct {
 	TZOffset    string
 	Steps       []StepsDay
 	Sleep       []SleepSample
+	Workouts    []Workout
 	Raw         []byte // исходное тело: хранится для идемпотентности и пересчёта
 
 	// Complete — выгрузка полная за даты From..To (Google Health): сон в ней
@@ -67,6 +68,15 @@ type SleepSample struct {
 	Start time.Time
 	End   time.Time
 	Value string
+}
+
+// Workout — тренировка. Minutes — без пауз, если источник их знает, иначе end − start.
+type Workout struct {
+	ID      string
+	Start   time.Time
+	Minutes int
+	Type    string
+	Source  string // google | file | http
 }
 
 // Source поставляет выгрузки. Реализации: FileSource (Mac), HTTPSource (Fly.io).
@@ -106,6 +116,14 @@ type rawExport struct {
 		End   string `json:"end"`
 		Value string `json:"value"`
 	} `json:"sleep"`
+	// Workouts — необязательный массив тренировок (SPEC_v2, 3.1). schema остаётся 1.
+	Workouts []struct {
+		ID      string   `json:"id"`
+		Start   string   `json:"start"`
+		End     string   `json:"end"`
+		Type    string   `json:"type"`
+		Minutes *flexInt `json:"minutes"`
+	} `json:"workouts"`
 }
 
 // Parse разбирает и нормализует выгрузку. Неизвестные поля игнорируются,
@@ -151,6 +169,27 @@ func Parse(raw []byte) (Export, error) {
 			continue
 		}
 		e.Sleep = append(e.Sleep, SleepSample{Start: start, End: end, Value: NormalizeSleepValue(s.Value)})
+	}
+
+	source := r.Source
+	if source != "google" {
+		source = "file" // HTTP и файл неразличимы по телу; core уточняет по источнику
+	}
+	for _, w := range r.Workouts {
+		start, err1 := time.Parse(time.RFC3339, strings.TrimSpace(w.Start))
+		end, err2 := time.Parse(time.RFC3339, strings.TrimSpace(w.End))
+		if err1 != nil || err2 != nil || !end.After(start) {
+			continue
+		}
+		minutes := int(end.Sub(start).Minutes())
+		if w.Minutes != nil && *w.Minutes > 0 {
+			minutes = int(*w.Minutes)
+		}
+		id := w.ID
+		if id == "" {
+			id = source + "-" + start.UTC().Format(time.RFC3339)
+		}
+		e.Workouts = append(e.Workouts, Workout{ID: id, Start: start, Minutes: minutes, Type: strings.TrimSpace(w.Type), Source: source})
 	}
 	return e, nil
 }

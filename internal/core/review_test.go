@@ -33,7 +33,7 @@ func TestWeeklyReviewMoodThenAnchor(t *testing.T) {
 	if err := h.db.SetMark(ctx, "2026-10-28", "outside", 1, h.now); err != nil {
 		t.Fatal(err)
 	}
-	h.llm.reply = "Получилось: a\nПросело: b\nНа следующую неделю: c"
+	h.llm.reply = "Получилось: a\nУзкое место: b\nНа следующую неделю: c"
 	h.tick("2026-11-01 20:00", plus5)
 
 	weekly := h.tg.matching("📅")
@@ -51,8 +51,16 @@ func TestWeeklyReviewMoodThenAnchor(t *testing.T) {
 		t.Errorf("настроение: %v", mood)
 	}
 	e := h.tg.lastEdit()
-	if !strings.Contains(e.text, "Какой якорь на этой неделе не сработал?") || len(e.rows) != 5 {
+	if !strings.Contains(e.text, "Виделся с друзьями на неделе?") || len(e.rows[0]) != 2 {
 		t.Fatalf("второй шаг: %+v", e)
+	}
+	h.app.OnCallback(ctx, e.rows[0][0].Data, review[0].id)
+	if social, _ := h.db.Answers(ctx, answerSocial, "2026-10-26"); social[""] != 1 {
+		t.Errorf("люди: %v", social)
+	}
+	e = h.tg.lastEdit()
+	if !strings.Contains(e.text, "Какой якорь на этой неделе не сработал?") || len(e.rows) != 5 {
+		t.Fatalf("третий шаг: %+v", e)
 	}
 
 	h.llm.reply = "Запасной план: если не закрыл ноутбук до 19:00 → выйти за дверь в 19:00."
@@ -70,14 +78,14 @@ func TestAnchorReviewWithoutClaude(t *testing.T) {
 	h := newHarness(t)
 	h.llm.err = errFake
 	h.now = at("2026-11-03 10:00", plus5)
-	h.app.OnCallback(ctx, "w:2026-10-26:a:outside", 7)
+	h.app.OnCallback(ctx, "w:2026-11-02:a:outside", 7)
 	h.waitEdit(t, "Запасной план: если «закрыл ноутбук после работы» не случилось → выйти за дверь")
 }
 
 func TestMonthlyAutomatismAndRelease(t *testing.T) {
 	h := newHarness(t)
 	h.tick("2026-10-01 10:00", plus5) // привычки с 1 октября: к декабрю им девятая неделя
-	h.llm.reply = "Получилось: a\nПросело: b\nНа следующую неделю: c"
+	h.llm.reply = "Получилось: a\nУзкое место: b\nНа следующую неделю: c"
 	// Прошлый месяц: зубы уже шли сами.
 	if err := h.db.SetAnswer(ctx, answerAuto, "2026-11", "teeth", 4, h.now); err != nil {
 		t.Fatal(err)
@@ -218,7 +226,7 @@ func TestWatchInviteFlow(t *testing.T) {
 		t.Error("владельцу не сообщили")
 	}
 
-	h.llm.reply = "Получилось: секрет\nПросело: b\nНа следующую неделю: c"
+	h.llm.reply = "Получилось: секрет\nУзкое место: b\nНа следующую неделю: c"
 	h.tick("2026-11-01 20:00", plus5)
 	h.tg.mu.Lock()
 	shared := append([]sent(nil), h.tg.shared...)
@@ -250,7 +258,7 @@ func TestSleepRegularityInWeekly(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	h.llm.reply = "Получилось: a\nПросело: b\nНа следующую неделю: c"
+	h.llm.reply = "Получилось: a\nУзкое место: b\nНа следующую неделю: c"
 	h.tick("2026-11-01 20:00", plus5)
 	if w := h.tg.matching("📅"); len(w) != 1 || !strings.Contains(w[0].text, "Регулярность сна: 100 из 100") {
 		t.Fatalf("неделя: %+v", w)

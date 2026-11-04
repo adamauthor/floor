@@ -24,9 +24,10 @@ const (
 	kvWatchChat   = "watch_chat"
 	kvWatchName   = "watch_name"
 
-	answerMood = "mood"
-	answerAuto = "auto"
-	answerPHQ  = "phq"
+	answerMood   = "mood"
+	answerAuto   = "auto"
+	answerPHQ    = "phq"
+	answerSocial = "social"
 
 	watchPending = "…" // в кнопке меню: ссылка отправлена, человек её ещё не открыл
 
@@ -55,12 +56,22 @@ func (a *App) weekData(ctx context.Context, monday, today string, week []store.D
 	if sri, ok := metrics.SleepRegularity(plainDays(nights)); ok {
 		data.SRI = &sri
 	}
+	data.Training = a.trainingDays(ctx, monday, sunday)
+	if r, _ := a.lastReport(ctx, today); r != nil {
+		data.Extra = append(data.Extra, render.MoneyLine(*r, today))
+	}
+	if social, err := a.Store.Answers(ctx, answerSocial, metrics.AddDays(monday, -7)); err == nil {
+		if v, ok := social[""]; ok {
+			data.Extra = append(data.Extra, render.SocialLine(v == 1))
+		}
+	}
 	return data, nil
 }
 
 // ---------- настроение недели и разбор якоря ----------
 
-// sendReview — после сводки один вопрос о настроении, затем — какой якорь не сработал.
+// sendReview — после сводки одно сообщение по шагам: настроение, люди, якорь, финграмотность.
+// Ни один вопрос не обязателен: в понедельник в 12:00 кнопки протухают.
 func (a *App) sendReview(ctx context.Context, monday string, f habits.File) {
 	rows := [][]Button{make([]Button, 0, 5)}
 	for n := 1; n <= 5; n++ {
@@ -88,7 +99,11 @@ func (a *App) onReview(ctx context.Context, rest string, msgID int) string {
 	}
 	monday, kind, value := parts[0], parts[1], parts[2]
 	now := a.Now()
-	f := a.currentHabits(ctx, now.In(a.location(ctx)).Format(time.DateOnly))
+	local := now.In(a.location(ctx))
+	if reviewExpired(local, monday) {
+		return render.ExpiredReply
+	}
+	f := a.currentHabits(ctx, local.Format(time.DateOnly))
 	switch kind {
 	case answerMood:
 		n, err := strconv.Atoi(value)
@@ -99,10 +114,23 @@ func (a *App) onReview(ctx context.Context, rest string, msgID int) string {
 			a.Log.Error("answer_failed", "error", err)
 			return "Не сохранилось, нажми ещё раз."
 		}
-		a.edit(ctx, msgID, render.AnchorQuestion(n), anchorRows(monday, f.Active()))
+		a.edit(ctx, msgID, render.SocialQuestion(n), [][]Button{{
+			{Text: "Да", Data: callbackWeek + monday + ":s:1"}, {Text: "Нет", Data: callbackWeek + monday + ":s:0"},
+		}})
+	case "s":
+		met := 0
+		if value == "1" {
+			met = 1
+		}
+		if err := a.Store.SetAnswer(ctx, answerSocial, monday, "", met, now); err != nil {
+			a.Log.Error("answer_failed", "error", err)
+			return "Не сохранилось, нажми ещё раз."
+		}
+		a.edit(ctx, msgID, render.AnchorQuestion(), anchorRows(monday, f.Active()))
 	case "a":
 		if value == "*" {
-			a.edit(ctx, msgID, "Якоря на месте. Неделя — та же схема.", nil)
+			text, rows := a.learningStep(ctx, monday, "Якоря на месте. Неделя — та же схема.")
+			a.edit(ctx, msgID, text, rows)
 			return ""
 		}
 		h, ok := f.Find(value)
@@ -111,12 +139,52 @@ func (a *App) onReview(ctx context.Context, rest string, msgID int) string {
 		}
 		a.edit(ctx, msgID, "Думаю над якорем «"+escape(h.Title)+"»…", nil)
 		// Claude отвечает до минуты, а кнопка ждёт ответа секунды: дальше — в фоне.
-		go a.reviewAnchor(context.WithoutCancel(ctx), msgID, h)
+		go a.reviewAnchor(context.WithoutCancel(ctx), msgID, monday, h)
+	case "l":
+		done := 0
+		if value == "1" {
+			done = 1
+		}
+		if err := a.Store.SetAnswer(ctx, answerLearning, monday, "", done, now); err != nil {
+			a.Log.Error("answer_failed", "error", err)
+			return "Не сохранилось, нажми ещё раз."
+		}
+		text := "📚 Действие недели сделано ✅"
+		if done == 0 {
+			text = "📚 Перенёс: тема повторится в понедельник, программа сдвинется на неделю."
+			if w, ok := a.learningWeek(ctx, metrics.AddDays(monday, 7)); !ok || !w.Repeat {
+				text = "📚 Тема закрыта как пропущенная: переносить можно не больше двух раз подряд."
+			}
+		}
+		a.Log.Info("learning_answered", "week", monday, "done", done == 1)
+		a.edit(ctx, msgID, text, nil)
 	}
 	return ""
 }
 
-func (a *App) reviewAnchor(ctx context.Context, msgID int, h habits.Habit) {
+// reviewExpired — вопросы недели живут до понедельника, 12:00.
+func reviewExpired(local time.Time, monday string) bool {
+	d, err := time.Parse(time.DateOnly, monday)
+	if err != nil {
+		return true
+	}
+	deadline := time.Date(d.Year(), d.Month(), d.Day()+7, 12, 0, 0, 0, local.Location())
+	return !local.Before(deadline)
+}
+
+// learningStep — последний шаг вопросов недели: действие финграмотности, если программа идёт.
+func (a *App) learningStep(ctx context.Context, monday, before string) (string, [][]Button) {
+	w, ok := a.learningWeek(ctx, monday)
+	if !ok {
+		return before, nil
+	}
+	return before + "\n\n" + render.LearningQuestion(w.Topic.Title, w.Topic.Action), [][]Button{{
+		{Text: "Действие сделано", Data: callbackWeek + monday + ":l:1"},
+		{Text: "Перенести", Data: callbackWeek + monday + ":l:0"},
+	}}
+}
+
+func (a *App) reviewAnchor(ctx context.Context, msgID int, monday string, h habits.Habit) {
 	today := a.Now().In(a.location(ctx)).Format(time.DateOnly)
 	wake := a.conf().WakeAnchor.String()
 	text := render.AnchorFallback(h, wake)
@@ -127,7 +195,8 @@ func (a *App) reviewAnchor(ctx context.Context, msgID int, h habits.Habit) {
 			}
 		}
 	}
-	a.edit(ctx, msgID, render.AnchorReply(h, wake, text), nil)
+	reply, rows := a.learningStep(ctx, monday, render.AnchorReply(h, wake, text))
+	a.edit(ctx, msgID, reply, rows)
 }
 
 func (a *App) edit(ctx context.Context, msgID int, text string, rows [][]Button) {

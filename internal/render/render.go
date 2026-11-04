@@ -122,7 +122,8 @@ type MorningData struct {
 	WakeDeltaMin   *int
 	SleepMinutes   *int
 	StepsYesterday *int
-	Step           string // уже в форме «Шаг на сегодня: …»
+	Step           string   // уже в форме «Шаг на сегодня: …»
+	Extra          []string // блоки под шагом: тренировки, тема недели, цель-дата
 }
 
 // Morning — утренняя сводка: три строки кода и шаг дня.
@@ -141,7 +142,11 @@ func Morning(d MorningData, r Rules) string {
 	if len(lines) == 0 {
 		body = NoDataText
 	}
-	return fmt.Sprintf("☀️ %s\n\n%s\n\n%s", DateTitle(d.Date), body, html.EscapeString(d.Step))
+	text := fmt.Sprintf("☀️ %s\n\n%s\n\n%s", DateTitle(d.Date), body, html.EscapeString(d.Step))
+	for _, e := range d.Extra {
+		text += "\n\n" + e
+	}
+	return text
 }
 
 // FloorReply — чем заменяется вечернее сообщение после нажатия.
@@ -173,7 +178,7 @@ func cell(s string) string {
 	return s + strings.Repeat(" ", width-len([]rune(s)))
 }
 
-func weekTable(days []metrics.Day, today string, r Rules, hs []habits.Habit, marks map[string]map[string]int) string {
+func weekTable(days []metrics.Day, today string, r Rules, hs []habits.Habit, marks map[string]map[string]int, training map[string]int) string {
 	wake := "Подъём  "
 	steps := "Шаги    "
 	floor := "Пол     "
@@ -204,7 +209,7 @@ func weekTable(days []metrics.Day, today string, r Rules, hs []habits.Habit, mar
 		}
 	}
 	lines := []string{"        Пн  Вт  Ср  Чт  Пт  Сб  Вс", wake, steps, floor}
-	lines = append(lines, habitRows(days, today, hs, marks)...)
+	lines = append(lines, habitRows(days, today, hs, marks, training)...)
 	for i, l := range lines {
 		lines[i] = strings.TrimRight(l, " ")
 	}
@@ -222,6 +227,9 @@ type WeeklyData struct {
 	Marks   map[string]map[string]int // дата → id привычки → уровень
 	Returns int                       // возвращений после пропуска за неделю
 	SRI     *int                      // регулярность сна; nil — мало данных
+
+	Training map[string]int // дата → минуты тренировок
+	Extra    []string       // строки под цифрами: деньги, люди
 }
 
 // Weekly — недельная сводка: таблица, регулярность, якоря, три строки.
@@ -230,7 +238,7 @@ func Weekly(d WeeklyData, r Rules) string {
 	var b strings.Builder
 	b.WriteString(weekTitle(d.Monday))
 	b.WriteString("\n\n<pre>")
-	b.WriteString(weekTable(d.Days, d.Today, r, d.Habits, d.Marks))
+	b.WriteString(weekTable(d.Days, d.Today, r, d.Habits, d.Marks, d.Training))
 	b.WriteString("</pre>\n\n")
 	fmt.Fprintf(&b, "Подъём в норме: %d из %d", s.WakeInNorm, len(d.Days))
 	if s.WakeKnown > 1 {
@@ -242,6 +250,9 @@ func Weekly(d WeeklyData, r Rules) string {
 	fmt.Fprintf(&b, "\nШаги: пол взят %d из %d", s.StepsFloor, s.StepsKnown)
 	if d.Returns > 0 {
 		fmt.Fprintf(&b, "\nВернулся после пропуска: %s", times(d.Returns))
+	}
+	for _, e := range d.Extra {
+		b.WriteString("\n" + e)
 	}
 	b.WriteString("\n\nЯкоря на неделю:\n")
 	for _, h := range d.Habits {
@@ -264,11 +275,19 @@ func weekLabel(week int) string {
 }
 
 // HabitCard — закреплённое сообщение: что развиваю, что это запускает и какой минимум.
-func HabitCard(f habits.File, today, wake string) string {
+// week — сколько тренировок на этой неделе у недельных привычек.
+func HabitCard(f habits.File, today, wake string, week map[string]int) string {
 	var b strings.Builder
 	b.WriteString("📌 <b>Привычки и якоря</b>\n")
 	for _, h := range f.Active() {
-		fmt.Fprintf(&b, "\n%s · %s\n%s\nпол: %s\n", habitTitle(h, true), weekLabel(h.Week(today)),
+		label := weekLabel(h.Week(today))
+		if h.Since > today {
+			label = "с " + DayMonth(h.Since)
+		}
+		if h.Weekly() {
+			label = fmt.Sprintf("%d из %d на этой неделе · %s", week[h.ID], h.PerWeek, label)
+		}
+		fmt.Fprintf(&b, "\n%s · %s\n%s\nпол: %s\n", habitTitle(h, true), label,
 			anchorLine(h, wake), html.EscapeString(h.Floor))
 	}
 	if auto := f.Automatic(); len(auto) > 0 {
@@ -277,6 +296,13 @@ func HabitCard(f habits.File, today, wake string) string {
 			names[i] = habitTitle(h, false)
 		}
 		fmt.Fprintf(&b, "\nНа автомате: %s\n", strings.Join(names, " · "))
+	}
+	if queue := f.Queue(); len(queue) > 0 {
+		names := make([]string, len(queue))
+		for i, h := range queue {
+			names[i] = habitTitle(h, false)
+		}
+		fmt.Fprintf(&b, "\nДальше: %s\n", strings.Join(names, ", "))
 	}
 	b.WriteString("\nПол — минимум на плохой день. Пропуск не обнуляет. Не пропускай дважды.")
 	return b.String()
@@ -313,7 +339,7 @@ func StripTags(s string) string {
 
 // ContextTable — компактная таблица дней для промпта:
 // дата | подъём | Δ мин | сон | шаги | пол дня | привычки.
-func ContextTable(days []metrics.Day, hs []habits.Habit, marks map[string]map[string]int) string {
+func ContextTable(days []metrics.Day, hs []habits.Habit, marks map[string]map[string]int, training map[string]int) string {
 	var b strings.Builder
 	b.WriteString("дата | подъём | Δ мин | сон | шаги | пол дня | привычки\n")
 	for _, d := range days {
@@ -339,6 +365,9 @@ func ContextTable(days []metrics.Day, hs []habits.Habit, marks map[string]map[st
 			if level, ok := marks[d.Date][h.ID]; ok {
 				hm = append(hm, h.Title+": "+[...]string{"мимо", "пол", "цель"}[min(max(level, 0), 2)])
 			}
+		}
+		if m := training[d.Date]; m > 0 {
+			hm = append(hm, fmt.Sprintf("тренировка %d мин", m))
 		}
 		marked := "-"
 		if len(hm) > 0 {

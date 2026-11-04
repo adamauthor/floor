@@ -141,11 +141,11 @@ func TestCleanStep(t *testing.T) {
 }
 
 func TestCleanWeekly(t *testing.T) {
-	good := "Получилось: а\nПросело: б\nНа следующую неделю: в"
-	if got, ok := CleanWeekly("Итог:\n**Получилось: а**\n\nПросело: б\nНа следующую неделю: в\nПока!"); !ok || got != good {
+	good := "Получилось: а\nУзкое место: б\nНа следующую неделю: в"
+	if got, ok := CleanWeekly("Итог:\n**Получилось: а**\n\nУзкое место: б\nНа следующую неделю: в\nПока!"); !ok || got != good {
 		t.Errorf("got %q %v", got, ok)
 	}
-	if _, ok := CleanWeekly("Получилось: а\nПросело: б"); ok {
+	if _, ok := CleanWeekly("Получилось: а\nУзкое место: б"); ok {
 		t.Error("две строки не должны проходить")
 	}
 }

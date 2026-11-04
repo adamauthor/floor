@@ -136,6 +136,57 @@ type googleSleep struct {
 	Value string `json:"value"`
 }
 
+type googleWorkout struct {
+	ID      string `json:"id"`
+	Start   string `json:"start"`
+	End     string `json:"end"`
+	Type    string `json:"type"`
+	Minutes int    `json:"minutes"`
+}
+
+// workouts — сессии тренировок, начатые с даты since.
+func (s *GoogleSource) workouts(ctx context.Context, since time.Time) ([]googleWorkout, error) {
+	q := url.Values{}
+	q.Set("filter", fmt.Sprintf(`exercise.interval.civil_start_time >= "%s"`, since.Format(time.DateOnly)))
+	q.Set("pageSize", "25")
+	out := []googleWorkout{}
+	for page := 0; page < 20; page++ {
+		var resp struct {
+			DataPoints []struct {
+				Name     string `json:"name"`
+				Exercise *struct {
+					Interval       googleInterval `json:"interval"`
+					ExerciseType   string         `json:"exerciseType"`
+					ActiveDuration string         `json:"activeDuration"`
+				} `json:"exercise"`
+			} `json:"dataPoints"`
+			NextPageToken string `json:"nextPageToken"`
+		}
+		if err := s.call(ctx, http.MethodGet, "/v4/users/me/dataTypes/exercise/dataPoints", q, nil, &resp); err != nil {
+			return nil, err
+		}
+		for _, p := range resp.DataPoints {
+			if p.Exercise == nil {
+				continue
+			}
+			start, end, ok := p.Exercise.Interval.local(s.Loc)
+			if !ok {
+				continue
+			}
+			w := googleWorkout{ID: p.Name, Start: start, End: end, Type: p.Exercise.ExerciseType}
+			if d, err := time.ParseDuration(p.Exercise.ActiveDuration); err == nil {
+				w.Minutes = int(d.Minutes())
+			}
+			out = append(out, w)
+		}
+		if resp.NextPageToken == "" {
+			return out, nil
+		}
+		q.Set("pageToken", resp.NextPageToken)
+	}
+	return out, nil
+}
+
 // fetch возвращает выгрузку и ключ её содержимого без generated_at.
 func (s *GoogleSource) fetch(ctx context.Context) (Export, []byte, error) {
 	days := s.Days
@@ -155,10 +206,20 @@ func (s *GoogleSource) fetch(ctx context.Context) (Export, []byte, error) {
 		return Export{}, nil, fmt.Errorf("сон: %w", err)
 	}
 
+	// Тренировки не обязательны: сбой здесь не должен стоить шагов и сна.
+	workouts, err := s.workouts(ctx, from)
+	if err != nil {
+		if s.Log != nil {
+			s.Log.Warn("google_workouts_failed", "error", err)
+		}
+		workouts = []googleWorkout{}
+	}
+
 	key, err := json.Marshal(struct {
-		Steps []googleSteps `json:"steps"`
-		Sleep []googleSleep `json:"sleep"`
-	}{steps, sleep})
+		Steps    []googleSteps   `json:"steps"`
+		Sleep    []googleSleep   `json:"sleep"`
+		Workouts []googleWorkout `json:"workouts"`
+	}{steps, sleep, workouts})
 	if err != nil {
 		return Export{}, nil, err
 	}
@@ -171,6 +232,7 @@ func (s *GoogleSource) fetch(ctx context.Context) (Export, []byte, error) {
 		"tz_offset":    now.Format("-07:00"),
 		"steps":        steps,
 		"sleep":        sleep,
+		"workouts":     workouts,
 	})
 	if err != nil {
 		return Export{}, nil, err

@@ -152,8 +152,9 @@ func (f *fakeTG) matching(sub string) []sent {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	var out []sent
+	sub = strings.ReplaceAll(sub, "\u00a0", " ")
 	for _, m := range f.msgs {
-		if strings.Contains(m.text, sub) {
+		if strings.Contains(strings.ReplaceAll(m.text, "\u00a0", " "), sub) {
 			out = append(out, m)
 		}
 	}
@@ -614,7 +615,7 @@ func TestWeeklyOnSundayMatchesDB(t *testing.T) {
 	if err := h.db.SetFloor(ctx, "2026-10-28", "+05:00", "no", h.now); err != nil {
 		t.Fatal(err)
 	}
-	h.llm.reply = "Получилось: a\nПросело: b\nНа следующую неделю: c"
+	h.llm.reply = "Получилось: a\nУзкое место: b\nНа следующую неделю: c"
 
 	h.tick("2026-11-01 19:59", plus5)
 	if len(h.tg.matching("📅")) != 0 {
@@ -632,7 +633,7 @@ func TestWeeklyOnSundayMatchesDB(t *testing.T) {
 		"Пол     ·   ·   ❌  ·   ·   ·   …",
 		"Шаги: пол взят 1 из 6",
 		"Якоря на неделю:",
-		"Получилось: a\nПросело: b\nНа следующую неделю: c",
+		"Получилось: a\nУзкое место: b\nНа следующую неделю: c",
 	} {
 		if !strings.Contains(got[0].text, want) {
 			t.Errorf("нет %q в:\n%s", want, got[0].text)

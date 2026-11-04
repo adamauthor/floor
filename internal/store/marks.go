@@ -107,3 +107,22 @@ func (s *Store) AnswerHistory(ctx context.Context, kind, habitID string, limit i
 	}
 	return out, rows.Err()
 }
+
+// AnswersByPeriod — все ответы вида kind без привязки к привычке: период → значение.
+func (s *Store) AnswersByPeriod(ctx context.Context, kind string) (map[string]int, error) {
+	rows, err := s.db.QueryContext(ctx, `SELECT period, value FROM answers WHERE kind = ? AND habit_id = ''`, kind)
+	if err != nil {
+		return nil, fmt.Errorf("чтение ответов: %w", err)
+	}
+	defer rows.Close()
+	out := make(map[string]int)
+	for rows.Next() {
+		var p string
+		var v int
+		if err := rows.Scan(&p, &v); err != nil {
+			return nil, fmt.Errorf("чтение ответов: %w", err)
+		}
+		out[p] = v
+	}
+	return out, rows.Err()
+}

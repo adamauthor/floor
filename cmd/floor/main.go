@@ -10,6 +10,7 @@ import (
 	"os"
 	"os/signal"
 	"runtime/debug"
+	"strings"
 	"sync"
 	"syscall"
 	"time"
@@ -20,6 +21,7 @@ import (
 	"floor/internal/habits"
 	"floor/internal/health"
 	"floor/internal/llm"
+	"floor/internal/money"
 	"floor/internal/render"
 	"floor/internal/schedule"
 	"floor/internal/store"
@@ -33,6 +35,9 @@ const usage = `floor — бот «пола»
   floor                    запустить бота
   floor debug-day [дата]   метрики дня из базы (YYYY-MM-DD, по умолчанию сегодня)
   floor habits             привычки и якоря, проверка habits.json
+  floor money [--date D] [текст]
+                           план денег: проверка money.json и отчёт по последней сверке
+                           или по тексту сверки (ничего не сохраняет)
   floor google-auth        войти в Google Health (для HEALTH_SOURCE=google)
   floor version            версия`
 
@@ -54,6 +59,8 @@ func dispatch(ctx context.Context, args []string) error {
 		return debugDay(ctx, args[1:])
 	case "habits":
 		return showHabits(ctx)
+	case "money":
+		return showMoney(ctx, args[1:])
 	case "google-auth":
 		return googleAuth(ctx)
 	case "version":
@@ -291,7 +298,7 @@ func showHabits(ctx context.Context) error {
 	if err != nil {
 		return fmt.Errorf("%s:\n%w", cfg.HabitsFile, err)
 	}
-	card := render.HabitCard(f, today, cfg.WakeAnchor.String())
+	card := render.HabitCard(f, today, cfg.WakeAnchor.String(), nil)
 	fmt.Println(render.StripTags(card))
 	fmt.Println("\nФайл:", cfg.HabitsFile)
 	return nil
@@ -303,4 +310,45 @@ func level(s string) slog.Level {
 		return slog.LevelInfo
 	}
 	return l
+}
+
+// showMoney проверяет план денег и печатает отчёт: по тексту сверки, если он передан,
+// иначе по последней сверке из базы или по точке отсчёта. Ничего не сохраняет.
+func showMoney(ctx context.Context, args []string) error {
+	cfg, err := config.LoadLocal()
+	if err != nil {
+		return fmt.Errorf("конфигурация:\n%w", err)
+	}
+	date := time.Now().In(cfg.DefaultTZ).Format(time.DateOnly)
+	if len(args) >= 2 && args[0] == "--date" {
+		date, args = args[1], args[2:]
+	}
+	_, f, err := money.Load(cfg.MoneyFile, date)
+	if err != nil {
+		return fmt.Errorf("%s:\n%w", cfg.MoneyFile, err)
+	}
+	if text := render.MoneyWarnings(f.Checks(), f); text != "" {
+		fmt.Println(render.StripTags(text) + "\n")
+	}
+	base := f.BaselineSnapshot()
+	prev := &base
+	if db, err := store.Open(ctx, cfg.DBPath); err == nil {
+		if last, err := db.LastSnapshot(ctx); err == nil && last != nil {
+			prev = last
+		}
+		db.Close()
+	}
+	snap := *prev
+	if text := strings.Join(args, " "); text != "" {
+		p := f.ParseText(text)
+		if !p.IsReconcile() || p.NeedsHelp() {
+			return fmt.Errorf("код не разобрал сверку (в боте помог бы Claude): %v", p.Values)
+		}
+		snap = money.Merge(date, p.Values, prev, f)
+		fmt.Println(render.StripTags(render.MoneyConfirm(snap, f, prev.Date)) + "\n")
+	}
+	r := f.Calc(snap, prev)
+	fmt.Println(render.StripTags(render.Money(r, f, render.MoneyFallback(r))))
+	fmt.Println("\nФайл:", cfg.MoneyFile)
+	return nil
 }

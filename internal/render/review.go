@@ -13,9 +13,14 @@ import (
 // MoodQuestion — раз в неделю после сводки (поведенческая активация: настроение рядом с делами).
 const MoodQuestion = "Как в целом было на этой неделе?\n1 — тяжело, 5 — хорошо."
 
-// AnchorQuestion — второй шаг недельного вопроса.
-func AnchorQuestion(mood int) string {
-	return fmt.Sprintf("Настроение: %d из 5.\n\nКакой якорь на этой неделе не сработал?", mood)
+// SocialQuestion — второй шаг недельных вопросов.
+func SocialQuestion(mood int) string {
+	return fmt.Sprintf("Настроение: %d из 5.\n\nВиделся с друзьями на неделе?", mood)
+}
+
+// AnchorQuestion — третий шаг недельных вопросов.
+func AnchorQuestion() string {
+	return "Какой якорь на этой неделе не сработал?"
 }
 
 // AnchorFallback — запасной план без Claude: пол привычки в любой момент до вечера.

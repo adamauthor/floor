@@ -27,9 +27,15 @@ type Config struct {
 	DefaultTZ        *time.Location
 
 	HabitsFile string
-	WebAppURL  string // страница настроек (Telegram Mini App)
-	WebAppAddr string // где бот принимает сохранение страницы; пусто — не принимает
-	NgrokAPI   string // локальный API ngrok, у которого бот узнаёт публичный адрес
+
+	MoneyFile         string // план денег (SPEC_v2, 2.2)
+	MoneyRemindDays   int    // через сколько дней без сверки напомнить
+	LearningFile      string // программа финграмотности; нет файла — встроенная
+	LearningStart     string // понедельник первой недели программы
+	WorkoutMinMinutes int    // минимальная длительность тренировки
+	WebAppURL         string // страница настроек (Telegram Mini App)
+	WebAppAddr        string // где бот принимает сохранение страницы; пусто — не принимает
+	NgrokAPI          string // локальный API ngrok, у которого бот узнаёт публичный адрес
 
 	HealthSource string // "file" | "http" | "google"
 	HealthFile   string
@@ -100,9 +106,15 @@ func LoadLocal() (Config, error) {
 		DefaultTZ:        r.location("DEFAULT_TZ", "Asia/Almaty"),
 
 		HabitsFile: expandHome(r.str("HABITS_FILE", "~/.floor/habits.json")),
-		WebAppURL:  r.str("WEBAPP_URL", "https://adamauthor.github.io/floor/app/"),
-		WebAppAddr: r.str("WEBAPP_ADDR", "127.0.0.1:8791"),
-		NgrokAPI:   r.str("NGROK_API", "http://127.0.0.1:4040"),
+
+		MoneyFile:         expandHome(r.str("MONEY_FILE", "~/.floor/money.json")),
+		MoneyRemindDays:   r.int("MONEY_REMIND_DAYS", 14),
+		LearningFile:      expandHome(r.str("LEARNING_FILE", "~/.floor/learning.json")),
+		LearningStart:     r.str("LEARNING_START", "2026-11-09"),
+		WorkoutMinMinutes: r.int("WORKOUT_MIN_MINUTES", 20),
+		WebAppURL:         r.str("WEBAPP_URL", "https://adamauthor.github.io/floor/app/"),
+		WebAppAddr:        r.str("WEBAPP_ADDR", "127.0.0.1:8791"),
+		NgrokAPI:          r.str("NGROK_API", "http://127.0.0.1:4040"),
 
 		HealthSource: r.str("HEALTH_SOURCE", "file"),
 		HealthFile:   expandHome(r.str("HEALTH_FILE", "~/Library/Mobile Documents/com~apple~CloudDocs/Floor/health.json")),

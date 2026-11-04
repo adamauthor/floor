@@ -3,6 +3,7 @@ package llm
 import (
 	"fmt"
 	"hash/fnv"
+	"sort"
 	"strings"
 	"unicode/utf8"
 )
@@ -21,6 +22,10 @@ const System = `Ты — Floor, личный помощник Адама. Пиш
 - Опирайся на привычки и якоря из контекста: X бери из существующего якоря, а не придумывай новый.
 - Не предлагай новых привычек, целей, приложений и систем.
 - Никаких стриков и счётчиков «N дней подряд»: пропуск ничего не обнуляет.
+- В контексте могут быть блоки «Деньги», «Тренировки», «Тема недели». Цифры бери только оттуда.
+- О деньгах: план и цели Адама уже решены. Не предлагай новых целей и продуктов,
+  не советуй конкретные акции, монеты или фонды, не обещай доходность.
+- Тренировка — любая, вид спорта не важен.
 - Не ставь диагнозов. Если пишут о сильном упадке настроения или мыслях о
   самоповреждении — мягко предложи обратиться к близкому человеку или специалисту.`
 
@@ -31,7 +36,10 @@ const (
 	stepPrefix   = "Шаг на сегодня:"
 )
 
-var weeklyPrefixes = []string{"Получилось:", "Просело:", "На следующую неделю:"}
+var weeklyPrefixes = []string{"Получилось:", "Узкое место:", "На следующую неделю:"}
+
+// bottleneckPrefix — последняя строка отчёта о деньгах.
+const bottleneckPrefix = "Узкое место:"
 
 func contextBlock(table, habits string) string {
 	return fmt.Sprintf("Привычки и якоря (привычка | якорь → цель | пол | неделя с начала):\n%s\nДни (дата | подъём | Δ мин от якоря | сон | шаги | пол дня | привычки):\n%s", habits, table)
@@ -49,8 +57,8 @@ func WeeklyPrompt(table, habits string) string {
 	return contextBlock(table, habits) + `
 Напиши итог недели. Ровно три строки и больше ничего:
 Получилось: …
-Просело: …
-На следующую неделю: один шаг в форме «когда X → делаю Y»`
+Узкое место: одно ограничение по всем данным недели (сон, шаги, привычки, тренировки, деньги), которое сильнее всего тормозит остальное
+На следующую неделю: один шаг именно по узкому месту, в форме «когда X → делаю Y»`
 }
 
 // FreePrompt — ответ на свободный текст с контекстом и историей диалога.
@@ -66,6 +74,42 @@ func FreePrompt(table, habits string, history []Turn) string {
 		fmt.Fprintf(&b, "%s: %s\n", who, t.Text)
 	}
 	return b.String()
+}
+
+// MoneyParsePrompt — разбор сверки, с которой не справился код. keys — id счёта → алиасы.
+func MoneyParsePrompt(text string, keys map[string][]string) string {
+	var b strings.Builder
+	b.WriteString("Сообщение с остатками по счетам:\n")
+	b.WriteString(text)
+	b.WriteString("\n\nСчета (ключ: как называются в сообщении):\n")
+	ids := make([]string, 0, len(keys))
+	for k := range keys {
+		ids = append(ids, k)
+	}
+	sort.Strings(ids)
+	for _, k := range ids {
+		fmt.Fprintf(&b, "%s: %s\n", k, strings.Join(keys[k], ", "))
+	}
+	b.WriteString(`Верни только JSON-объект с этими ключами: целое число тенге или null, если суммы в сообщении нет.
+«142к» — 142000, «1,12 млн» — 1120000. debt_total — общий долг. Ничего не выдумывай, без пояснений.`)
+	return b.String()
+}
+
+// MoneyPrompt — последняя строка отчёта о деньгах.
+func MoneyPrompt(block string) string {
+	return block + `
+Напиши одну строку не длиннее 160 символов, начиная с «Узкое место:»: самое важное отклонение от плана и, если есть, одно действие.
+Если всё по плану — ответь пустой строкой.`
+}
+
+// CleanBottleneck — строка «Узкое место: …»; false — ответ пуст или не в формате.
+func CleanBottleneck(raw string) (string, bool) {
+	for _, line := range strings.Split(raw, "\n") {
+		if line = cleanLine(line); strings.HasPrefix(line, bottleneckPrefix) {
+			return Truncate(line, MaxStepRunes), true
+		}
+	}
+	return "", false
 }
 
 // MaxAnchorRunes — предел ответа про якорь.

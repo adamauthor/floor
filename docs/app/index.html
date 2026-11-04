@@ -170,6 +170,7 @@ body.web.dirty #save { display: block; }
       { id: 'teeth', emoji: '🦷', title: 'Зубы', anchor: 'встал с кровати', action: 'зубы до телефона', floor: 'зубы', since: '2026-11-04', auto: true },
       { id: 'outside', emoji: '🚶', title: 'Улица', anchor: 'почистил зубы', action: 'одеваюсь и 10 минут на улице', floor: 'выйти за дверь', since: '2026-11-04' },
       { id: 'tidy', emoji: '📦', title: 'Вещь на место', anchor: 'вернулся с улицы', action: '5 минут навожу порядок', floor: 'одна вещь на место', since: '2026-11-04' },
+      { id: 'training', emoji: '🏋️', title: 'Тренировка', kind: 'workout', per_week: 3, anchor: 'закрыл ноутбук в пн, ср, пт', action: 'тренировка 45+ минут', floor: '20 минут любой тренировки', since: '2026-11-09', queued: true },
       { id: 'night', emoji: '🌙', title: 'Отбой', anchor: 'ответил боту на вечерний вопрос', action: 'телефон на зарядку подальше от кровати', floor: 'ставлю будильник', since: '2026-11-04', paused: true },
     ],
     watch: 'Мама',
@@ -227,7 +228,7 @@ body.web.dirty #save { display: block; }
   }
 
   const fmt = n => String(n).replace(/\B(?=(\d{3})+(?!\d))/g, ' ');
-  const active = () => state.h.filter(h => !h.paused && !h.auto);
+  const active = () => state.h.filter(h => !h.paused && !h.auto && !h.queued);
   const anchorText = h => h.anchor.replaceAll('{wake}', state.s.wake);
   const addMin = (clock, m) => {
     const [h, mm] = clock.split(':').map(Number);
@@ -253,7 +254,8 @@ body.web.dirty #save { display: block; }
       el('span', { class: 'emoji' }, h.emoji || '•'),
       el('span', { class: 'label' },
         el('span', { class: 'name' }, h.title,
-          h.paused ? el('span', { class: 'tag' }, 'пауза') : h.auto ? el('span', { class: 'tag floor' }, 'на автомате') : null),
+          h.paused ? el('span', { class: 'tag' }, 'пауза') : h.queued ? el('span', { class: 'tag' }, 'в очереди')
+            : h.auto ? el('span', { class: 'tag floor' }, 'на автомате') : h.kind === 'workout' ? el('span', { class: 'tag floor' }, h.per_week + ' в неделю') : null),
         el('span', { class: 'when' }, 'когда ' + anchorText(h) + ' → ' + h.action),
         h.floor ? el('span', { class: 'when' }, 'пол: ' + h.floor) : null),
       chevron());
@@ -387,6 +389,21 @@ body.web.dirty #save { display: block; }
       el('div', { class: 'foot' }, 'Минимум на плохой день — выполнимый без желания. После пропуска бот предложит именно его.'),
 
       el('div', { class: 'group', style: 'margin-top:24px' },
+        el('label', { class: 'row' }, el('span', { class: 'label' }, 'Тренировки из часов'),
+          toggle(h.kind === 'workout', on => { h.kind = on ? 'workout' : undefined; h.per_week = on ? (h.per_week || 3) : undefined; changed(); render(); })),
+        h.kind === 'workout' ? el('div', { class: 'row' }, el('span', { class: 'label' }, 'Раз в неделю'),
+          el('span', { class: 'seg' }, [2, 3, 4, 5].map(n =>
+            el('button', { type: 'button', class: h.per_week === n ? 'on' : '', onclick: () => { haptic('sel'); h.per_week = n; changed(); render(); } }, String(n))))) : null),
+      el('div', { class: 'foot' }, h.kind === 'workout'
+        ? 'Засчитывается сама, когда часы записали тренировку от 20 минут. Пол недели — на одну меньше цели. В пол дня не входит.'
+        : 'Обычная привычка отмечается вечером: пол или цель.'),
+
+      el('div', { class: 'group', style: 'margin-top:24px' },
+        el('label', { class: 'row' }, el('span', { class: 'label' }, 'В очереди'),
+          toggle(!!h.queued, (on, input) => {
+            if (!on && !h.paused && !h.auto && active().length >= MAX_ACTIVE) { input.checked = true; alertMsg('Уже пять активных привычек. Сначала выпусти или поставь на паузу другую.'); return; }
+            h.queued = on || undefined; changed(); render();
+          })),
         el('label', { class: 'row' }, el('span', { class: 'label' }, 'На автомате'),
           toggle(!!h.auto, (on, input) => {
             if (!on && !h.paused && active().length >= MAX_ACTIVE) { input.checked = true; alertMsg('Уже пять активных привычек. Сначала выпусти или поставь на паузу другую.'); return; }
@@ -397,7 +414,7 @@ body.web.dirty #save { display: block; }
             if (!on && !h.auto && active().length >= MAX_ACTIVE) { input.checked = true; alertMsg('Уже пять активных привычек. Сначала поставь на паузу другую.'); return; }
             h.paused = on || undefined; changed(); render();
           }))),
-      el('div', { class: 'foot' }, 'На автомате — идёт сама: бот о ней больше не спрашивает, место освобождается. Пауза убирает отовсюду. Возраст сохраняется в обоих случаях.'),
+      el('div', { class: 'foot' }, 'В очереди — запустится, когда пол держится 10 из 14 дней и есть место: бот предложит в воскресенье. На автомате — идёт сама, бот о ней не спрашивает. Пауза убирает отовсюду.'),
 
       el('div', { class: 'group', style: 'margin-top:24px' },
         state.h.length > 1 ? el('button', { type: 'button', class: 'row link' + (i === 0 ? ' muted' : ''), onclick: () => move(i, -1) }, 'Выше в списке') : null,
@@ -448,6 +465,8 @@ body.web.dirty #save { display: block; }
         if (h.emoji) out.emoji = h.emoji;
         if (h.paused) out.paused = true;
         if (h.auto) out.auto = true;
+        if (h.queued) out.queued = true;
+        if (h.kind === 'workout') { out.kind = 'workout'; out.per_week = h.per_week || 3; }
         return out;
       }),
     };

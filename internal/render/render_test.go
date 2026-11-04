@@ -151,7 +151,7 @@ func TestWeekTable(t *testing.T) {
 	marks := map[string]map[string]int{
 		"2026-10-26": {"teeth": 2, "outside": 1}, "2026-10-28": {"teeth": 0, "outside": 0},
 	}
-	got := weekTable(weekDays(), "2026-11-01", rules, hs, marks)
+	got := weekTable(weekDays(), "2026-11-01", rules, hs, marks, nil)
 	want := strings.Join([]string{
 		"        Пн  Вт  Ср  Чт  Пт  Сб  Вс",
 		"Подъём  ✅  ✅  ·   ✅  ·   ·   ✅",
@@ -171,7 +171,7 @@ func TestWeekly(t *testing.T) {
 	hs := habits.Defaults("2026-10-26").Habits
 	got := Weekly(WeeklyData{
 		Monday: "2026-10-26", Today: "2026-11-01", Days: weekDays(), Habits: hs, Wake: "07:00",
-		Summary: "Получилось: a<b\nПросело: x\nНа следующую неделю: y",
+		Summary: "Получилось: a<b\nУзкое место: x\nНа следующую неделю: y",
 		Returns: 2, SRI: ptr(71),
 	}, rules)
 	for _, want := range []string{
@@ -204,7 +204,7 @@ func TestWeekTitleAcrossYear(t *testing.T) {
 func TestHabitCard(t *testing.T) {
 	f := habits.Defaults("2026-10-31")
 	f.Habits[3].Auto = true
-	got := HabitCard(f, "2026-11-08", "07:00")
+	got := HabitCard(f, "2026-11-08", "07:00", nil)
 	for _, want := range []string{
 		"📌 <b>Привычки и якоря</b>",
 		"⏰ <b>Подъём</b> · неделя 2 из ~10",
@@ -222,7 +222,7 @@ func TestHabitCard(t *testing.T) {
 
 func TestHabitCardAfterPlateauAndEscaping(t *testing.T) {
 	hs := []habits.Habit{{Title: "A<B", Anchor: "x & y", Action: "z", Floor: "f", Since: "2026-01-01"}}
-	got := HabitCard(habits.File{Habits: hs}, "2026-10-31", "07:00")
+	got := HabitCard(habits.File{Habits: hs}, "2026-10-31", "07:00", nil)
 	if !strings.Contains(got, "<b>A&lt;B</b> · неделя 44\n") || !strings.Contains(got, "когда x &amp; y → z") {
 		t.Errorf("карточка:\n%s", got)
 	}
@@ -238,7 +238,7 @@ func TestContextTable(t *testing.T) {
 	got := ContextTable([]metrics.Day{
 		{Date: "2026-10-31", WakeAt: wake("2026-10-31T07:24:00+05:00"), WakeDeltaMin: ptr(24), SleepMinutes: ptr(400), Steps: ptr(7812), FloorStatus: "yes"},
 		{Date: "2026-11-01"},
-	}, habits.Defaults("2026-10-31").Habits[1:3], map[string]map[string]int{"2026-10-31": {"teeth": 2, "outside": 0}})
+	}, habits.Defaults("2026-10-31").Habits[1:3], map[string]map[string]int{"2026-10-31": {"teeth": 2, "outside": 0}}, nil)
 	want := "дата | подъём | Δ мин | сон | шаги | пол дня | привычки\n" +
 		"2026-10-31 | 07:24 | +24 | 6:40 | 7812 | yes | Зубы: цель, Улица: мимо\n" +
 		"2026-11-01 | - | - | - | - | none | -\n"
