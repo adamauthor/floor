@@ -35,7 +35,7 @@ lint: ## go vet + staticcheck
 install-launchd: build ## Поставить фоновым сервисом на Маке
 	@test -f .env || (echo "Нет .env — скопируй .env.example" && exit 1)
 	mkdir -p $(FLOOR_DIR)/bin $(FLOOR_DIR)/logs
-	# Новый файл, а не запись поверх: macOS убивает процесс, если подписанный бинарь поменяли на месте.
+	@# Новый файл, а не запись поверх: macOS убивает процесс, если подписанный бинарь поменяли на месте.
 	cp $(BIN) $(FLOOR_DIR)/bin/floor.new && mv -f $(FLOOR_DIR)/bin/floor.new $(FLOOR_DIR)/bin/floor
 	cp .env $(FLOOR_DIR)/.env && chmod 600 $(FLOOR_DIR)/.env
 	sed "s|__HOME__|$(HOME)|g" deploy/launchd/$(PLIST) > $(HOME)/Library/LaunchAgents/$(PLIST)
