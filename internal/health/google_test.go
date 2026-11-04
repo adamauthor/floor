@@ -166,6 +166,27 @@ func TestGoogleAuthAlert(t *testing.T) {
 	}
 }
 
+func TestGoogleRetriesSoonAfterNetworkError(t *testing.T) {
+	f := &fakeGoogle{}
+	f.status.Store(http.StatusServiceUnavailable)
+	src := newGoogleSource(t, f)
+	src.Interval = time.Hour
+	src.RetryAfter = 20 * time.Millisecond
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	ch, err := src.Updates(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	time.Sleep(50 * time.Millisecond)
+	f.status.Store(0)
+	select {
+	case <-ch:
+	case <-time.After(2 * time.Second):
+		t.Fatal("после сетевой ошибки повтор не случился раньше обычного интервала")
+	}
+}
+
 func TestGoogleServerErrorIsNotAuth(t *testing.T) {
 	f := &fakeGoogle{}
 	f.status.Store(http.StatusInternalServerError)

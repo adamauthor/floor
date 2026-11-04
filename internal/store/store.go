@@ -235,6 +235,17 @@ func (s *Store) SetSleep(ctx context.Context, date, tz string, minutes int, wake
 	return nil
 }
 
+// ClearSleep убирает итог ночи, которой больше нет в полной выгрузке.
+func (s *Store) ClearSleep(ctx context.Context, date string, now time.Time) error {
+	_, err := s.db.ExecContext(ctx, `
+		UPDATE days SET sleep_minutes = NULL, wake_at = NULL, wake_delta_min = NULL, updated_at = ?
+		WHERE date = ? AND (sleep_minutes IS NOT NULL OR wake_at IS NOT NULL)`, stamp(now), date)
+	if err != nil {
+		return fmt.Errorf("очистка сна: %w", err)
+	}
+	return nil
+}
+
 // SetFloor сохраняет отметку пола; повторная отметка перезаписывает прошлую.
 func (s *Store) SetFloor(ctx context.Context, date, tz, status string, now time.Time) error {
 	_, err := s.db.ExecContext(ctx, `

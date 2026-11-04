@@ -140,7 +140,11 @@ func segments(samples []health.SleepSample) []metrics.Segment {
 
 // recomputeSleep пересчитывает ночи, которых касается выгрузка, по объединению
 // недавних выгрузок: каждая из них видит только «последние 2 дня» и может обрезать ночь.
+// Полная выгрузка (Google) заменяет данные за свой период целиком.
 func (a *App) recomputeSleep(ctx context.Context, exp health.Export, now time.Time) (int, error) {
+	if exp.Complete {
+		return a.replaceSleep(ctx, exp, now)
+	}
 	touched := metrics.Nights(segments(exp.Sleep))
 	if len(touched) == 0 {
 		return 0, nil
@@ -169,6 +173,28 @@ func (a *App) recomputeSleep(ctx context.Context, exp health.Export, now time.Ti
 		}
 	}
 	return len(touched), nil
+}
+
+// replaceSleep записывает ночи полной выгрузки и очищает дни её периода без сна:
+// Fitbit пересчитывает и правит сон, старые сегменты не должны его раздувать.
+func (a *App) replaceSleep(ctx context.Context, exp health.Export, now time.Time) (int, error) {
+	nights := metrics.Nights(segments(exp.Sleep))
+	n := 0
+	for date := exp.From; date <= exp.To; date = metrics.AddDays(date, 1) {
+		night, ok := nights[date]
+		if !ok {
+			if err := a.Store.ClearSleep(ctx, date, now); err != nil {
+				return n, err
+			}
+			continue
+		}
+		delta := metrics.WakeDelta(night.WakeAt, date, a.Cfg.WakeAnchor)
+		if err := a.Store.SetSleep(ctx, date, exp.TZOffset, night.Minutes, night.WakeAt, delta, now); err != nil {
+			return n, err
+		}
+		n++
+	}
+	return n, nil
 }
 
 // Tick — один шаг расписания. Ошибки отправки включают бэкофф, остальное продолжает работу.

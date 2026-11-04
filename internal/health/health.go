@@ -42,6 +42,12 @@ type Export struct {
 	Steps       []StepsDay
 	Sleep       []SleepSample
 	Raw         []byte // исходное тело: хранится для идемпотентности и пересчёта
+
+	// Complete — выгрузка полная за даты From..To (Google Health): сон в ней
+	// не склеивается с прошлыми выгрузками, а ночь без данных очищается.
+	// Команда iOS видит только «последние 2 дня» и полной не бывает.
+	Complete bool
+	From, To string
 }
 
 // SHA256 — ключ идемпотентности выгрузки.
@@ -88,6 +94,9 @@ type rawExport struct {
 	Schema      flexInt `json:"schema"`
 	GeneratedAt string  `json:"generated_at"`
 	TZOffset    string  `json:"tz_offset"`
+	Source      string  `json:"source"`
+	RangeFrom   string  `json:"range_from"`
+	RangeTo     string  `json:"range_to"`
 	Steps       []struct {
 		Date  string  `json:"date"`
 		Count flexInt `json:"count"`
@@ -115,6 +124,13 @@ func Parse(raw []byte) (Export, error) {
 	}
 
 	e := Export{Schema: int(r.Schema), GeneratedAt: generated, Raw: raw}
+	if r.Source == "google" {
+		from, err1 := time.Parse(time.DateOnly, r.RangeFrom)
+		to, err2 := time.Parse(time.DateOnly, r.RangeTo)
+		if err1 == nil && err2 == nil && !to.Before(from) && to.Sub(from) <= 31*24*time.Hour {
+			e.Complete, e.From, e.To = true, r.RangeFrom, r.RangeTo
+		}
+	}
 
 	e.TZOffset = NormalizeOffset(r.TZOffset)
 	if e.TZOffset == "" {

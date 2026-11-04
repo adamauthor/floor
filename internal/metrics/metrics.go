@@ -96,26 +96,20 @@ func isNap(e Episode) bool {
 	return e.Asleep < napMaxDuration && start.Hour() >= 10 && start.Hour() < 18
 }
 
-// window — ночное окно дня date: с D-1 18:00 до D 14:00 в заданном поясе.
-func window(date string, loc *time.Location) (from, to time.Time, ok bool) {
-	d, err := time.ParseInLocation(time.DateOnly, date, loc)
-	if err != nil {
-		return time.Time{}, time.Time{}, false
-	}
-	return d.Add(-6 * time.Hour), d.Add(14 * time.Hour), true
+// NightDate — день, к которому относится эпизод: сон, начавшийся с D-1 18:00 до D 18:00,
+// относится к D. У каждого эпизода ровно один день, поэтому поздний подъём (сон 12:30–18:10)
+// не засчитывается и сегодня, и завтра. Считается в смещении самого эпизода:
+// смена пояса не двигает прошлые ночи.
+func NightDate(e Episode) string {
+	return e.Start.In(e.End.Location()).Add(6 * time.Hour).Format(time.DateOnly)
 }
 
-// MainEpisode выбирает основной эпизод дня: самый длинный, пересекающий окно.
-// Окно считается в смещении самого эпизода, поэтому смена пояса не двигает прошлые ночи.
+// MainEpisode выбирает основной эпизод дня: самый длинный из относящихся к нему.
 func MainEpisode(episodes []Episode, date string) (Episode, bool) {
 	var best Episode
 	found := false
 	for _, e := range episodes {
-		if isNap(e) {
-			continue
-		}
-		from, to, ok := window(date, e.End.Location())
-		if !ok || !e.End.After(from) || !e.Start.Before(to) {
+		if isNap(e) || NightDate(e) != date {
 			continue
 		}
 		if !found || e.Asleep > best.Asleep {
@@ -131,11 +125,7 @@ func Nights(segments []Segment) map[string]Night {
 	out := make(map[string]Night)
 	dates := make(map[string]bool)
 	for _, e := range episodes {
-		end := e.End
-		dates[end.Format(time.DateOnly)] = true
-		if end.Hour() >= 18 {
-			dates[end.AddDate(0, 0, 1).Format(time.DateOnly)] = true
-		}
+		dates[NightDate(e)] = true
 	}
 	for date := range dates {
 		if e, ok := MainEpisode(episodes, date); ok {

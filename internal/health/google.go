@@ -40,8 +40,11 @@ type GoogleSource struct {
 	Loc      *time.Location
 	Days     int           // сколько последних дней забирать
 	Interval time.Duration // как часто опрашивать
-	Now      func() time.Time
-	Log      *slog.Logger
+	// RetryAfter — пауза после сетевой ошибки (по умолчанию минута):
+	// Мак часто просыпается без сети на первые секунды.
+	RetryAfter time.Duration
+	Now        func() time.Time
+	Log        *slog.Logger
 	// Alert вызывается при потере доступа, не чаще раза в 12 часов.
 	Alert func(ctx context.Context, err error)
 
@@ -50,18 +53,27 @@ type GoogleSource struct {
 }
 
 // Updates опрашивает API сразу и затем каждые Interval; повтор тех же данных не отправляет.
+// После сетевой ошибки повторяет через минуту, после потери доступа — по обычному графику.
 func (s *GoogleSource) Updates(ctx context.Context) (<-chan Export, error) {
 	interval := s.Interval
 	if interval == 0 {
 		interval = 15 * time.Minute
+	}
+	retry := s.RetryAfter
+	if retry == 0 {
+		retry = time.Minute
 	}
 	out := make(chan Export)
 	go func() {
 		defer close(out)
 		var last []byte
 		for {
+			wait := interval
 			if exp, key, err := s.fetch(ctx); err != nil {
 				s.fail(ctx, err)
+				if !errors.Is(err, ErrGoogleAuth) && retry < interval {
+					wait = retry
+				}
 			} else if !bytes.Equal(key, last) {
 				select {
 				case out <- exp:
@@ -71,7 +83,7 @@ func (s *GoogleSource) Updates(ctx context.Context) (<-chan Export, error) {
 				}
 			}
 			select {
-			case <-time.After(interval):
+			case <-time.After(wait):
 			case <-ctx.Done():
 				return
 			}
@@ -153,6 +165,8 @@ func (s *GoogleSource) fetch(ctx context.Context) (Export, []byte, error) {
 	raw, err := json.Marshal(map[string]any{
 		"schema":       SchemaVersion,
 		"source":       "google",
+		"range_from":   from.Format(time.DateOnly),
+		"range_to":     today.Format(time.DateOnly),
 		"generated_at": now.Format(time.RFC3339),
 		"tz_offset":    now.Format("-07:00"),
 		"steps":        steps,
@@ -360,10 +374,17 @@ func GoogleOAuth(clientID, clientSecret string) *oauth2.Config {
 	}
 }
 
+// googleTimeout — предел одного запроса: зависшая сеть не должна останавливать опрос.
+const googleTimeout = time.Minute
+
 // GoogleClient — HTTP-клиент с токеном из файла; обновлённый токен сохраняется обратно.
 func GoogleClient(ctx context.Context, conf *oauth2.Config, tokenFile string) *http.Client {
+	// Тот же предел и для обновления токена: oauth2 берёт клиента из контекста.
+	ctx = context.WithValue(ctx, oauth2.HTTPClient, &http.Client{Timeout: googleTimeout})
 	ts := &fileTokenSource{conf: conf, path: tokenFile, ctx: ctx}
-	return oauth2.NewClient(ctx, ts)
+	c := oauth2.NewClient(ctx, ts)
+	c.Timeout = googleTimeout
+	return c
 }
 
 type fileTokenSource struct {

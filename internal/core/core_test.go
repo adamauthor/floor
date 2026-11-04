@@ -239,6 +239,41 @@ func TestLaterPartialExportDoesNotShrinkNight(t *testing.T) {
 	}
 }
 
+func googleExport(generated, from, to, sleepJSON string) []byte {
+	return []byte(fmt.Sprintf(`{"schema":1,"source":"google","range_from":%q,"range_to":%q,"generated_at":%q,"tz_offset":"+05:00","steps":[],"sleep":[%s]}`,
+		from, to, generated, sleepJSON))
+}
+
+func TestCompleteExportReplacesSleep(t *testing.T) {
+	h := newHarness(t)
+	h.now = at("2026-10-31 08:00", plus5)
+	h.apply(t, googleExport("2026-10-31T08:00:00+05:00", "2026-10-30", "2026-10-31", nightSleep))
+	d, _ := h.db.GetDay(ctx, "2026-10-31")
+	if d.SleepMinutes == nil || *d.SleepMinutes != 441 {
+		t.Fatalf("день: %+v", d)
+	}
+
+	// Fitbit пересчитал ночь: середина оказалась бодрствованием. Старые сегменты
+	// не склеиваются с новыми, иначе сон раздулся бы обратно до 441 минуты.
+	h.now = at("2026-10-31 09:00", plus5)
+	h.apply(t, googleExport("2026-10-31T09:00:00+05:00", "2026-10-30", "2026-10-31",
+		`{"start":"2026-10-30T23:51:00+05:00","end":"2026-10-31T03:10:00+05:00","value":"asleep"},
+		{"start":"2026-10-31T03:10:00+05:00","end":"2026-10-31T05:00:00+05:00","value":"awake"},
+		{"start":"2026-10-31T05:00:00+05:00","end":"2026-10-31T07:24:00+05:00","value":"asleep"}`))
+	d, _ = h.db.GetDay(ctx, "2026-10-31")
+	if d.SleepMinutes == nil || *d.SleepMinutes != 199 {
+		t.Errorf("после пересчёта сон = %v, ожидалось 199 (самый длинный эпизод)", d.SleepMinutes)
+	}
+
+	// Сон удалён в приложении: день периода без сна очищается.
+	h.now = at("2026-10-31 10:00", plus5)
+	h.apply(t, googleExport("2026-10-31T10:00:00+05:00", "2026-10-30", "2026-10-31", ""))
+	d, _ = h.db.GetDay(ctx, "2026-10-31")
+	if d.SleepMinutes != nil || d.WakeAt != nil || d.WakeDeltaMin != nil {
+		t.Errorf("сон не очищен: %+v", d)
+	}
+}
+
 func TestOlderExportDoesNotMoveTimezone(t *testing.T) {
 	h := newHarness(t)
 	h.now = at("2026-10-31 09:00", plus5)

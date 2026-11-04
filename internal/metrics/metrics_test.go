@@ -114,6 +114,29 @@ func TestNights(t *testing.T) {
 			},
 			date: "2026-10-31", wantFound: false,
 		},
+		{
+			name: "поздний подъём относится к своему дню",
+			segments: []Segment{
+				seg("2026-11-02T12:37:00+05:00", "2026-11-02T18:11:00+05:00", "asleep"),
+			},
+			date: "2026-11-02", wantFound: true,
+			wantWake: "2026-11-02T18:11:00+05:00", wantMinutes: 334,
+		},
+		{
+			name: "поздний подъём не засчитывается следующему дню",
+			segments: []Segment{
+				seg("2026-11-02T12:37:00+05:00", "2026-11-02T18:11:00+05:00", "asleep"),
+			},
+			date: "2026-11-03", wantFound: false,
+		},
+		{
+			name: "сон, начавшийся после 18:00, — ночь следующего дня",
+			segments: []Segment{
+				seg("2026-11-03T19:30:00+05:00", "2026-11-04T03:00:00+05:00", "asleep"),
+			},
+			date: "2026-11-04", wantFound: true,
+			wantWake: "2026-11-04T03:00:00+05:00", wantMinutes: 450,
+		},
 		{name: "нет сегментов", date: "2026-10-31", wantFound: false},
 	}
 	for _, tt := range tests {
