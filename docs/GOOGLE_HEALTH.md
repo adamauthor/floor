@@ -23,6 +23,15 @@
 
 В режиме **Testing** Google отзывает доступ каждые 7 дней. Чтобы этого не было, на странице **Audience** нажми **Publish app** (статус **In production**).
 
+Для публикации Branding требует ссылки. Они лежат в ветке `gh-pages` этого репозитория:
+
+- Application home page: `https://adamauthor.github.io/floor/`
+- Privacy policy: `https://adamauthor.github.io/floor/privacy/`
+- Terms of service: `https://adamauthor.github.io/floor/terms/`
+- Authorized domains: `adamauthor.github.io`
+
+Логотип не загружай: с ним опубликованное приложение придётся отправлять на проверку.
+
 Проверку приложения Google проходить не нужно: непроверенное приложение работает до 100 пользователей. При входе Google покажет экран «Приложение не проверено». Нажми **Дополнительно → Перейти на страницу Floor**: это твоё собственное приложение.
 
 ## 3. Ключи в `.env`
