@@ -75,10 +75,27 @@ func (a *App) notesContext(ctx context.Context) string {
 func (a *App) replyWithActions(ctx context.Context, raw string) (string, error) {
 	reply, actions, err := command.Split(raw)
 	reply = truncateReply(reply)
-	if err == nil && len(actions) == 0 {
-		_, sendErr := a.say(ctx, kindChat, escape(reply), nil)
-		return reply, sendErr
+	var charts []command.Action
+	if err == nil {
+		charts, actions, err = command.Charts(actions, a.Now().In(a.location(ctx)).Format(time.DateOnly))
 	}
+	if err == nil && len(actions) == 0 {
+		var sendErr error
+		if reply != "" || len(charts) == 0 {
+			_, sendErr = a.say(ctx, kindChat, escape(reply), nil)
+		}
+		history := reply
+		for _, c := range charts {
+			a.sendChart(ctx, kindChat, c.What, c.Date)
+			history += "\n(показан график: " + c.What + ")"
+		}
+		return history, sendErr
+	}
+	defer func() {
+		for _, c := range charts {
+			a.sendChart(ctx, kindChat, c.What, c.Date)
+		}
+	}()
 	var plan command.Plan
 	if err == nil {
 		var st command.State

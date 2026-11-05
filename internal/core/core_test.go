@@ -33,6 +33,7 @@ type sent struct {
 	buttons []Button   // все кнопки подряд
 	rows    [][]Button // как в сообщении
 	chat    int64      // для SendTo
+	photo   []byte     // для SendPhoto
 }
 
 type fakeTG struct {
@@ -111,6 +112,30 @@ func flat(rows [][]Button) []Button {
 	var out []Button
 	for _, r := range rows {
 		out = append(out, r...)
+	}
+	return out
+}
+
+func (f *fakeTG) SendPhoto(_ context.Context, png []byte, caption string) (int, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.sendErr != nil {
+		return 0, f.sendErr
+	}
+	f.nextID++
+	f.msgs = append(f.msgs, sent{id: f.nextID, text: caption, photo: png})
+	return f.nextID, nil
+}
+
+// photos — отправленные картинки.
+func (f *fakeTG) photos() []sent {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	var out []sent
+	for _, m := range f.msgs {
+		if m.photo != nil {
+			out = append(out, m)
+		}
 	}
 	return out
 }

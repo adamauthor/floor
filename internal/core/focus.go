@@ -4,6 +4,7 @@ import (
 	"context"
 	"time"
 
+	"floor/internal/command"
 	"floor/internal/habits"
 	"floor/internal/metrics"
 	"floor/internal/money"
@@ -210,4 +211,5 @@ func (a *App) monthSummary(ctx context.Context, local time.Time, f habits.File) 
 		return
 	}
 	a.Log.Info("month_summary_sent", "month", from[:7])
+	a.sendChart(ctx, kindReport, command.ChartMonth, from)
 }

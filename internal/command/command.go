@@ -34,6 +34,14 @@ const (
 	MoneyBudget = "money_budget"
 	Remember    = "remember"
 	Forget      = "forget"
+	Chart       = "chart" // показать график: не меняет данных, рисуется сразу
+)
+
+// Графики, которые можно попросить.
+const (
+	ChartWeek  = "week"
+	ChartMonth = "month"
+	ChartMoney = "money"
 )
 
 // MaxActions — больше за раз не принимается: просьба, скорее всего, понята неверно.
@@ -78,6 +86,32 @@ type Action struct {
 	// заметки
 	Text string `json:"text,omitempty"`
 	Note int    `json:"note,omitempty"`
+
+	// график
+	What string `json:"what,omitempty"`
+}
+
+// Charts отделяет просьбы показать график от изменений и проверяет их.
+func Charts(actions []Action, today string) (charts, rest []Action, err error) {
+	for _, a := range actions {
+		if a.Op != Chart {
+			rest = append(rest, a)
+			continue
+		}
+		switch a.What {
+		case ChartWeek, ChartMonth, ChartMoney:
+		default:
+			return nil, nil, fmt.Errorf("нет такого графика: %q", a.What)
+		}
+		if a.Date == "" {
+			a.Date = today
+		}
+		if _, err := time.Parse(time.DateOnly, a.Date); err != nil || a.Date > today {
+			return nil, nil, fmt.Errorf("график: плохая дата %q", a.Date)
+		}
+		charts = append(charts, a)
+	}
+	return charts, rest, nil
 }
 
 // Split отделяет текст ответа от действий. Нет маркера — действий нет.
@@ -235,7 +269,9 @@ func (p *Plan) find(id string) (int, error) {
 	return -1, fmt.Errorf("нет привычки %q", id)
 }
 
-func (p *Plan) line(format string, args ...any) { p.Lines = append(p.Lines, fmt.Sprintf(format, args...)) }
+func (p *Plan) line(format string, args ...any) {
+	p.Lines = append(p.Lines, fmt.Sprintf(format, args...))
+}
 
 func (p *Plan) apply(s State, a Action) error {
 	switch a.Op {

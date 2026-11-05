@@ -162,3 +162,15 @@ func TestBuildSettingsMarksMoneyNotes(t *testing.T) {
 		t.Error("деньги без плана")
 	}
 }
+
+func TestCharts(t *testing.T) {
+	charts, rest, err := Charts([]Action{{Op: Chart, What: ChartWeek}, {Op: Remember, Text: "x"}, {Op: Chart, What: ChartMonth, Date: "2026-10-01"}}, "2026-11-05")
+	if err != nil || len(charts) != 2 || len(rest) != 1 || charts[0].Date != "2026-11-05" || charts[1].Date != "2026-10-01" {
+		t.Fatalf("%+v %+v %v", charts, rest, err)
+	}
+	for _, a := range []Action{{Op: Chart, What: "year"}, {Op: Chart, What: ChartMoney, Date: "2026-12-01"}, {Op: Chart, What: ChartWeek, Date: "вчера"}} {
+		if _, _, err := Charts([]Action{a}, "2026-11-05"); err == nil {
+			t.Errorf("принято: %+v", a)
+		}
+	}
+}

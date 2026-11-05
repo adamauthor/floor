@@ -74,10 +74,17 @@ func (s *Store) LastSnapshot(ctx context.Context) (*money.Snapshot, error) {
 		v := debt.Int64
 		snap.DebtTotal = &v
 	}
+	if err := s.balances(ctx, id, &snap); err != nil {
+		return nil, err
+	}
+	return &snap, nil
+}
+
+func (s *Store) balances(ctx context.Context, id int64, snap *money.Snapshot) error {
 	snap.Balances, snap.Carried = map[string]int64{}, map[string]bool{}
 	rows, err := s.db.QueryContext(ctx, `SELECT account, amount, carried FROM money_balances WHERE snapshot_id = ?`, id)
 	if err != nil {
-		return nil, fmt.Errorf("чтение сверки: %w", err)
+		return fmt.Errorf("чтение сверки: %w", err)
 	}
 	defer rows.Close()
 	for rows.Next() {
@@ -85,12 +92,53 @@ func (s *Store) LastSnapshot(ctx context.Context) (*money.Snapshot, error) {
 		var amount int64
 		var carried int
 		if err := rows.Scan(&account, &amount, &carried); err != nil {
-			return nil, fmt.Errorf("чтение сверки: %w", err)
+			return fmt.Errorf("чтение сверки: %w", err)
 		}
 		snap.Balances[account] = amount
 		snap.Carried[account] = carried == 1
 	}
-	return &snap, rows.Err()
+	return rows.Err()
+}
+
+// Snapshots — все сверки с даты from по порядку; за день — последняя.
+func (s *Store) Snapshots(ctx context.Context, from string) ([]money.Snapshot, error) {
+	rows, err := s.db.QueryContext(ctx, `SELECT id, date, debt_total, source FROM money_snapshots
+		WHERE id IN (SELECT MAX(id) FROM money_snapshots WHERE date >= ? GROUP BY date) ORDER BY date`, from)
+	if err != nil {
+		return nil, fmt.Errorf("чтение сверок: %w", err)
+	}
+	type head struct {
+		id   int64
+		snap money.Snapshot
+	}
+	var heads []head
+	for rows.Next() {
+		var h head
+		var debt sql.NullInt64
+		var source string
+		if err := rows.Scan(&h.id, &h.snap.Date, &debt, &source); err != nil {
+			rows.Close()
+			return nil, fmt.Errorf("чтение сверок: %w", err)
+		}
+		h.snap.Baseline = source == "baseline"
+		if debt.Valid {
+			v := debt.Int64
+			h.snap.DebtTotal = &v
+		}
+		heads = append(heads, h)
+	}
+	rows.Close()
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("чтение сверок: %w", err)
+	}
+	out := make([]money.Snapshot, 0, len(heads))
+	for _, h := range heads {
+		if err := s.balances(ctx, h.id, &h.snap); err != nil {
+			return nil, err
+		}
+		out = append(out, h.snap)
+	}
+	return out, nil
 }
 
 // SetPending запоминает распознанную сверку под id сообщения с кнопками.

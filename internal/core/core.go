@@ -14,6 +14,7 @@ import (
 	"sync"
 	"time"
 
+	"floor/internal/command"
 	"floor/internal/config"
 	"floor/internal/habits"
 	"floor/internal/health"
@@ -49,6 +50,8 @@ type Messenger interface {
 	Pin(ctx context.Context, msgID int) error
 	// Delete убирает сообщение из чата; ErrMessageGone — его уже нет или срок вышел.
 	Delete(ctx context.Context, msgID int) error
+	// SendPhoto отправляет картинку PNG с подписью (HTML, до 1024 символов).
+	SendPhoto(ctx context.Context, png []byte, caption string) (int, error)
 	Typing(ctx context.Context) error
 	// SetMenuApp ставит кнопку меню слева от поля ввода, открывающую страницу настроек.
 	SetMenuApp(ctx context.Context, label, url string) error
@@ -500,6 +503,7 @@ func (a *App) weekly(ctx context.Context, local time.Time) error {
 	if err := a.Store.SetKV(ctx, kvWeeklySent, key); err != nil {
 		return err
 	}
+	a.sendChart(ctx, kindReport, command.ChartWeek, key)
 	// Дальше — необязательное: сбой не должен повторять саму сводку.
 	a.shareWeekly(ctx, data)
 	a.sendReview(ctx, key, f)

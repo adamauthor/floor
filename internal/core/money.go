@@ -7,6 +7,7 @@ import (
 	"strings"
 	"time"
 
+	"floor/internal/command"
 	"floor/internal/llm"
 	"floor/internal/metrics"
 	"floor/internal/money"
@@ -273,6 +274,7 @@ func (a *App) moneyReport(ctx context.Context, f money.File, snap money.Snapshot
 		line = ""
 	}
 	a.send(ctx, kindReport, render.Money(r, f, line))
+	defer a.sendChart(ctx, kindReport, command.ChartMoney, snap.Date) // после всех текстов: рисуется дольше
 
 	if r.Debt != nil && r.Debt.Closed {
 		if done, _ := a.Store.GetKV(ctx, kvDebtClosed); done == "" {

@@ -74,6 +74,15 @@ func (a *App) sayRows(ctx context.Context, kind, text string, rows [][]Button) (
 	return id, err
 }
 
+// sayPhoto отправляет картинку и записывает её в журнал.
+func (a *App) sayPhoto(ctx context.Context, kind string, png []byte, caption string) (int, error) {
+	id, err := a.TG.SendPhoto(ctx, png, caption)
+	if err == nil {
+		a.track(ctx, id, kind)
+	}
+	return id, err
+}
+
 // track записывает сообщение и срок, когда его убрать.
 func (a *App) track(ctx context.Context, msgID int, kind string) {
 	if msgID == 0 {

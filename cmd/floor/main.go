@@ -38,6 +38,8 @@ const usage = `floor — бот «пола»
   floor money [--date D] [текст]
                            план денег: проверка money.json и отчёт по последней сверке
                            или по тексту сверки (ничего не сохраняет)
+  floor chart week|month|money [дата] файл.png
+                           нарисовать график по базе (ничего не отправляет)
   floor google-auth        войти в Google Health (для HEALTH_SOURCE=google)
   floor version            версия`
 
@@ -61,6 +63,8 @@ func dispatch(ctx context.Context, args []string) error {
 		return showHabits(ctx)
 	case "money":
 		return showMoney(ctx, args[1:])
+	case "chart":
+		return drawChart(ctx, args[1:])
 	case "google-auth":
 		return googleAuth(ctx)
 	case "version":
@@ -351,4 +355,33 @@ func showMoney(ctx context.Context, args []string) error {
 	fmt.Println(render.StripTags(render.Money(r, f, render.MoneyFallback(r))))
 	fmt.Println("\nФайл:", cfg.MoneyFile)
 	return nil
+}
+
+// drawChart — floor chart week|month|money [YYYY-MM-DD] файл.png: график по базе без Telegram.
+func drawChart(ctx context.Context, args []string) error {
+	if len(args) < 2 {
+		return errors.New("использование: floor chart week|month|money [YYYY-MM-DD] файл.png")
+	}
+	cfg, err := config.Load()
+	if err != nil {
+		return fmt.Errorf("конфигурация:\n%w", err)
+	}
+	db, err := store.Open(ctx, cfg.DBPath)
+	if err != nil {
+		return err
+	}
+	defer db.Close()
+	app := &core.App{Cfg: cfg, Store: db, Log: newLogger(cfg), Now: time.Now}
+	if err := app.LoadSettings(ctx); err != nil {
+		return err
+	}
+	date, out := time.Now().In(cfg.DefaultTZ).Format(time.DateOnly), args[len(args)-1]
+	if len(args) > 2 {
+		date = args[1]
+	}
+	png, err := app.Chart(ctx, args[0], date)
+	if err != nil {
+		return err
+	}
+	return os.WriteFile(out, png, 0o600)
 }

@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"html"
 	"strings"
+	"time"
 )
 
 // FocusItem — область, где стоит поднажать.
@@ -82,3 +83,32 @@ func Month(d MonthData) string {
 	b.WriteString("\n" + Focus(d.Focus))
 	return b.String()
 }
+
+// MonthName — «Ноябрь 2026» по дате YYYY-MM-DD или месяцу YYYY-MM.
+func MonthName(date string) string {
+	var m int
+	if len(date) < 7 {
+		return date
+	}
+	fmt.Sscanf(date[5:7], "%d", &m)
+	if m < 1 || m > 12 {
+		return date
+	}
+	return monthsNom[m] + " " + date[:4]
+}
+
+// WeekRange — «Неделя 2–8 ноября» или «Неделя 30 ноября – 6 декабря».
+func WeekRange(monday string) string {
+	from, err := time.Parse(time.DateOnly, monday)
+	if err != nil {
+		return "Неделя"
+	}
+	to := from.AddDate(0, 0, 6)
+	if from.Month() == to.Month() {
+		return fmt.Sprintf("Неделя %d–%d %s", from.Day(), to.Day(), months[to.Month()-1])
+	}
+	return fmt.Sprintf("Неделя %d %s – %d %s", from.Day(), months[from.Month()-1], to.Day(), months[to.Month()-1])
+}
+
+// Plural — форма слова для числа n: 1 день, 2 дня, 5 дней.
+func Plural(n int, one, few, many string) string { return plural(n, one, few, many) }

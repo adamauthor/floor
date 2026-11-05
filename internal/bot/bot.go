@@ -2,6 +2,7 @@
 package bot
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
@@ -149,6 +150,20 @@ func (b *Bot) SendRows(ctx context.Context, text string, rows [][]core.Button) (
 		params.ReplyMarkup = kb
 	}
 	msg, err := b.api.SendMessage(ctx, params)
+	if err != nil {
+		return 0, b.scrub(err)
+	}
+	return msg.ID, nil
+}
+
+// SendPhoto отправляет владельцу картинку PNG с подписью.
+func (b *Bot) SendPhoto(ctx context.Context, png []byte, caption string) (int, error) {
+	msg, err := b.api.SendPhoto(ctx, &tg.SendPhotoParams{
+		ChatID:    b.owner,
+		Photo:     &models.InputFileUpload{Filename: "floor.png", Data: bytes.NewReader(png)},
+		Caption:   caption,
+		ParseMode: models.ParseModeHTML,
+	})
 	if err != nil {
 		return 0, b.scrub(err)
 	}
