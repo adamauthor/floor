@@ -40,7 +40,7 @@ func (a *App) currentMoney(ctx context.Context, today string) (money.File, bool)
 	hash := shortHash(string(raw) + err.Error())
 	if seen, _ := a.Store.GetKV(ctx, kvMoneyBad); seen != hash {
 		text := "💰 В " + escape(path) + " ошибка, считаю по прошлой версии:\n" + escape(err.Error())
-		if _, sendErr := a.TG.Send(ctx, text, nil); sendErr == nil {
+		if _, sendErr := a.say(ctx, kindAlert, text, nil); sendErr == nil {
 			_ = a.Store.SetKV(ctx, kvMoneyBad, hash)
 		}
 	}
@@ -84,7 +84,7 @@ func (a *App) moneyTick(ctx context.Context, local time.Time) error {
 	}
 	if seen != hash {
 		if text := render.MoneyWarnings(f.Checks(), f); text != "" {
-			if _, err := a.TG.Send(ctx, text, nil); err != nil {
+			if _, err := a.say(ctx, kindReport, text, nil); err != nil {
 				return fmt.Errorf("план денег: %w", err)
 			}
 		}
@@ -95,7 +95,7 @@ func (a *App) moneyTick(ctx context.Context, local time.Time) error {
 
 	if end := f.TransfersEnd(); end != "" && today > end {
 		if done, _ := a.Store.GetKV(ctx, kvTransfersDone); done != end {
-			if _, err := a.TG.Send(ctx, render.TransfersEnded(f.MonthlyTransfers("", end)), nil); err != nil {
+			if _, err := a.say(ctx, kindReport, render.TransfersEnded(f.MonthlyTransfers("", end)), nil); err != nil {
 				return fmt.Errorf("переводы: %w", err)
 			}
 			if err := a.Store.SetKV(ctx, kvTransfersDone, end); err != nil {
@@ -123,7 +123,7 @@ func (a *App) moneyRemind(ctx context.Context, local time.Time, f money.File, la
 	if done, _ := a.Store.GetKV(ctx, kvMoneyReminded); done == last.Date {
 		return nil
 	}
-	if _, err := a.TG.Send(ctx, render.MoneyRemind, nil); err != nil {
+	if _, err := a.say(ctx, kindRemind, render.MoneyRemind, nil); err != nil {
 		return fmt.Errorf("напоминание: %w", err)
 	}
 	return a.Store.SetKV(ctx, kvMoneyReminded, last.Date)
@@ -154,14 +154,14 @@ func (a *App) onMoneyText(ctx context.Context, text string) bool {
 	if p.NeedsHelp() {
 		values = a.parseMoneyLLM(ctx, today, f, text)
 		if values == nil {
-			a.send(ctx, render.MoneyUnclear)
+			a.send(ctx, kindNotice, render.MoneyUnclear)
 			return true
 		}
 	}
 	last, err := a.lastSnapshot(ctx, f)
 	if err != nil {
 		a.Log.Error("money_failed", "error", err)
-		a.send(ctx, "Не получилось, попробуй ещё раз.")
+		a.send(ctx, kindNotice, "Не получилось, попробуй ещё раз.")
 		return true
 	}
 	snap := money.Merge(today, values, last, f)
@@ -170,7 +170,7 @@ func (a *App) onMoneyText(ctx context.Context, text string) bool {
 		prevDate = last.Date
 	}
 	rows := [][]Button{{{Text: "Верно", Data: callbackMoney + "ok"}, {Text: "Отмена", Data: callbackMoney + "no"}}}
-	id, err := a.TG.SendRows(ctx, render.MoneyConfirm(snap, f, prevDate), rows)
+	id, err := a.sayRows(ctx, kindPrompt, render.MoneyConfirm(snap, f, prevDate), rows)
 	if err != nil {
 		a.Log.Warn("reply_failed", "error", err)
 		return true
@@ -183,8 +183,8 @@ func (a *App) onMoneyText(ctx context.Context, text string) bool {
 	return true
 }
 
-func (a *App) send(ctx context.Context, text string) {
-	if _, err := a.TG.Send(ctx, text, nil); err != nil {
+func (a *App) send(ctx context.Context, kind, text string) {
+	if _, err := a.say(ctx, kind, text, nil); err != nil {
 		a.Log.Warn("reply_failed", "error", err)
 	}
 }
@@ -254,6 +254,7 @@ func (a *App) onMoney(ctx context.Context, action string, msgID int) string {
 	}
 	a.edit(ctx, msgID, render.MoneyConfirm(snap, f, prevDate)+"\n\nСохранено ✅", nil)
 	a.Log.Info("money_saved", "date", p.Date)
+	a.dropKind(ctx, kindRemind, 0)
 	// Отчёт с последней строкой от Claude: до минуты, кнопка столько не ждёт.
 	go a.moneyReport(context.WithoutCancel(ctx), f, snap, last)
 	return ""
@@ -271,11 +272,11 @@ func (a *App) moneyReport(ctx context.Context, f money.File, snap money.Snapshot
 	} else {
 		line = ""
 	}
-	a.send(ctx, render.Money(r, f, line))
+	a.send(ctx, kindReport, render.Money(r, f, line))
 
 	if r.Debt != nil && r.Debt.Closed {
 		if done, _ := a.Store.GetKV(ctx, kvDebtClosed); done == "" {
-			a.send(ctx, render.DebtClosed(r, f, f.MonthlyTransfers(f.ByRole(money.RoleDebtFund), snap.Date)))
+			a.send(ctx, kindReport, render.DebtClosed(r, f, f.MonthlyTransfers(f.ByRole(money.RoleDebtFund), snap.Date)))
 			if err := a.Store.SetKV(ctx, kvDebtClosed, snap.Date); err != nil {
 				a.Log.Warn("money_failed", "error", err)
 			}

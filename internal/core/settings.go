@@ -133,11 +133,12 @@ func (a *App) syncSettingsButton(ctx context.Context, local time.Time) error {
 
 // OnSettings — команда /settings: обновить кнопку меню и подсказать, где она.
 func (a *App) OnSettings(ctx context.Context) {
+	a.trackIncoming(ctx, kindCommand)
 	today := a.Now().In(a.location(ctx)).Format(time.DateOnly)
 	if err := a.setMenu(ctx, a.menuState(ctx, a.currentHabits(ctx, today))); err != nil {
 		a.Log.Warn("settings_send_failed", "error", err)
 	}
-	if _, err := a.TG.Send(ctx, "Настройки — кнопка «Floor» слева от поля ввода.", nil); err != nil {
+	if _, err := a.say(ctx, kindNotice, "Настройки — кнопка «Floor» слева от поля ввода.", nil); err != nil {
 		a.Log.Warn("settings_send_failed", "error", err)
 	}
 }
@@ -145,11 +146,12 @@ func (a *App) OnSettings(ctx context.Context) {
 // OnWebAppData — настройки со старой кнопки под полем ввода (sendData).
 // Окно при этом закрывается, поэтому итог уходит в чат.
 func (a *App) OnWebAppData(ctx context.Context, data string) {
+	a.trackIncoming(ctx, kindCommand)
 	res := a.SaveSettings(ctx, data)
 	if res.Invite != "" {
 		return // ссылка уже в чате
 	}
-	if _, err := a.TG.Send(ctx, res.Text, nil); err != nil {
+	if _, err := a.say(ctx, kindNotice, res.Text, nil); err != nil {
 		a.Log.Warn("settings_send_failed", "error", err)
 	}
 }
@@ -164,7 +166,7 @@ func (a *App) SaveSettings(ctx context.Context, data string) webapp.SaveResult {
 	res := webapp.SaveResult{OK: saved, Text: text}
 	if invite != "" {
 		res.Invite = invite
-		if _, err := a.TG.Send(ctx, "Ссылка для того, кто будет получать итог недели: "+invite, nil); err != nil {
+		if _, err := a.say(ctx, kindReport, "Ссылка для того, кто будет получать итог недели: "+invite, nil); err != nil {
 			a.Log.Warn("settings_send_failed", "error", err)
 		}
 	}

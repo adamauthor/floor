@@ -60,6 +60,7 @@ func (a *App) weekData(ctx context.Context, monday, today string, week []store.D
 	if r, _ := a.lastReport(ctx, today); r != nil {
 		data.Extra = append(data.Extra, render.MoneyLine(*r, today))
 	}
+	data.Focus, data.FocusOn = a.weekFocus(ctx, monday, today, f)
 	if social, err := a.Store.Answers(ctx, answerSocial, metrics.AddDays(monday, -7)); err == nil {
 		if v, ok := social[""]; ok {
 			data.Extra = append(data.Extra, render.SocialLine(v == 1))
@@ -77,7 +78,7 @@ func (a *App) sendReview(ctx context.Context, monday string, f habits.File) {
 	for n := 1; n <= 5; n++ {
 		rows[0] = append(rows[0], Button{Text: strconv.Itoa(n), Data: fmt.Sprintf("%s%s:mood:%d", callbackWeek, monday, n)})
 	}
-	if _, err := a.TG.SendRows(ctx, render.MoodQuestion, rows); err != nil {
+	if _, err := a.sayRows(ctx, kindPrompt, render.MoodQuestion, rows); err != nil {
 		a.Log.Warn("review_send_failed", "error", err)
 	}
 }
@@ -203,6 +204,9 @@ func (a *App) edit(ctx context.Context, msgID int, text string, rows [][]Button)
 	if err := a.TG.EditRows(ctx, msgID, text, rows); err != nil && !errors.Is(err, ErrMessageGone) {
 		a.Log.Warn("callback_edit_failed", "error", err)
 	}
+	if len(rows) == 0 {
+		a.answered(ctx, msgID)
+	}
 }
 
 // ---------- раз в месяц: автоматизм, опросник, выпуск ----------
@@ -222,11 +226,11 @@ func (a *App) monthly(ctx context.Context, local time.Time, f habits.File) {
 		a.Log.Warn("monthly_failed", "error", err)
 	}
 	active := f.Active()
-	if _, err := a.TG.SendRows(ctx, render.AutoQuestion(trend), autoRows(month, active, nil)); err != nil {
+	if _, err := a.sayRows(ctx, kindPrompt, render.AutoQuestion(trend), autoRows(month, active, nil)); err != nil {
 		a.Log.Warn("monthly_failed", "error", err)
 		return
 	}
-	if _, err := a.TG.SendRows(ctx, render.PHQIntro+"\n\n"+render.PHQQuestions[0], phqRows(month, 1)); err != nil {
+	if _, err := a.sayRows(ctx, kindPrompt, render.PHQIntro+"\n\n"+render.PHQQuestions[0], phqRows(month, 1)); err != nil {
 		a.Log.Warn("monthly_failed", "error", err)
 	}
 	if err := a.Store.SetKV(ctx, kvMonthlySent, month); err != nil {
@@ -384,7 +388,11 @@ func (a *App) onMonthly(ctx context.Context, rest string, msgID int) string {
 			return ""
 		}
 		a.Log.Info("phq_answered", "month", month)
-		a.edit(ctx, msgID, render.PHQResult(answers["1"]+answers["2"]), nil)
+		score := answers["1"] + answers["2"]
+		a.edit(ctx, msgID, render.PHQResult(score), nil)
+		if score >= render.PHQThreshold {
+			a.keep(ctx, msgID) // совет про специалиста не должен пропасть из чата
+		}
 	}
 	return ""
 }
@@ -451,7 +459,7 @@ func (a *App) dataGap(ctx context.Context, local time.Time) error {
 	if !had {
 		return nil
 	}
-	if _, err := a.TG.Send(ctx, render.DataGap(a.conf().HealthSource), nil); err != nil {
+	if _, err := a.say(ctx, kindAlert, render.DataGap(a.conf().HealthSource), nil); err != nil {
 		return fmt.Errorf("данные пропали: %w", err)
 	}
 	a.Log.Info("data_gap_alerted")
@@ -531,7 +539,7 @@ func (a *App) OnWatch(ctx context.Context, chatID int64, name, payload string) {
 	if err := a.TG.SendTo(ctx, chatID, "Готово. Раз в неделю, в воскресенье, сюда будет приходить короткий итог недели."); err != nil {
 		a.Log.Warn("share_failed", "error", err)
 	}
-	if _, err := a.TG.Send(ctx, escape(name)+" теперь получает итог недели. Отключить — в Floor, раздел «Сообщения».", nil); err != nil {
+	if _, err := a.say(ctx, kindNotice, escape(name)+" теперь получает итог недели. Отключить — в Floor, раздел «Сообщения».", nil); err != nil {
 		a.Log.Warn("share_failed", "error", err)
 	}
 	a.Tick(ctx, a.Now()) // кнопка меню покажет получателя

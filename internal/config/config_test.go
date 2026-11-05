@@ -1,6 +1,9 @@
 package config
 
-import "testing"
+import (
+	"reflect"
+	"testing"
+)
 
 func TestParseClock(t *testing.T) {
 	tests := []struct {
@@ -98,8 +101,17 @@ func TestSettingsApply(t *testing.T) {
 		{WakeAnchor: "09:30", Tolerance: 45, StepsFloor: 9000, StepsGoal: 8000, EveningAt: "22:15", WeeklyAt: "19:00"},
 	} {
 		before := c
-		if err := bad.Apply(&c); err == nil || c != before {
-			t.Errorf("%+v: err = %v, конфигурация изменилась: %v", bad, err, c != before)
+		if err := bad.Apply(&c); err == nil || !reflect.DeepEqual(c, before) {
+			t.Errorf("%+v: err = %v, конфигурация изменилась: %v", bad, err, !reflect.DeepEqual(c, before))
 		}
+	}
+}
+
+func TestWorkoutTypes(t *testing.T) {
+	if got := SplitList(" a, ,b ,"); len(got) != 2 || got[0] != "a" || got[1] != "b" {
+		t.Errorf("SplitList: %q", got)
+	}
+	if len(SplitList(DefaultWorkoutTypes)) < 10 {
+		t.Error("мало типов по умолчанию")
 	}
 }

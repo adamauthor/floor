@@ -44,6 +44,8 @@ type fakeTG struct {
 	removes []string // сообщения, убравшие кнопки под полем ввода
 	shared  []sent   // итоги недели второму человеку
 	typing  int
+	deleted []int
+	delErr  error
 	sendErr error
 	editErr error
 	nextID  int
@@ -140,6 +142,27 @@ func (f *fakeTG) RemoveKeyboard(_ context.Context, text string) error {
 	return nil
 }
 
+func (f *fakeTG) Delete(_ context.Context, id int) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.delErr != nil {
+		return f.delErr
+	}
+	f.deleted = append(f.deleted, id)
+	return nil
+}
+
+func (f *fakeTG) isDeleted(id int) bool {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	for _, d := range f.deleted {
+		if d == id {
+			return true
+		}
+	}
+	return false
+}
+
 func (f *fakeTG) Typing(context.Context) error {
 	f.mu.Lock()
 	defer f.mu.Unlock()
@@ -190,7 +213,8 @@ func testConfig(dir string) config.Config {
 		StepsFloor: 7000, StepsGoal: 10000,
 		EveningAt: config.Clock{Hour: 21}, WeeklyAt: config.Clock{Hour: 20},
 		DefaultTZ: plus5, LLMMaxCallsPerDay: 30,
-		HabitsFile: filepath.Join(dir, "habits.json"),
+		HabitsFile:   filepath.Join(dir, "habits.json"),
+		WorkoutTypes: config.SplitList(config.DefaultWorkoutTypes),
 	}
 }
 

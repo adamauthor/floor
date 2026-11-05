@@ -47,6 +47,8 @@ type Messenger interface {
 	// StartLink — ссылка t.me на бота с параметром /start.
 	StartLink(ctx context.Context, payload string) (string, error)
 	Pin(ctx context.Context, msgID int) error
+	// Delete убирает сообщение из чата; ErrMessageGone — его уже нет или срок вышел.
+	Delete(ctx context.Context, msgID int) error
 	Typing(ctx context.Context) error
 	// SetMenuApp ставит кнопку меню слева от поля ввода, открывающую страницу настроек.
 	SetMenuApp(ctx context.Context, label, url string) error
@@ -254,6 +256,7 @@ func (a *App) Tick(ctx context.Context, t time.Time) {
 		a.dataGap(ctx, local),
 		a.moneyTick(ctx, local),
 	)
+	a.sweep(ctx, t)
 
 	a.mu.Lock()
 	defer a.mu.Unlock()
@@ -309,7 +312,7 @@ func (a *App) notifyBadHabits(ctx context.Context, raw []byte, parseErr error) {
 		return
 	}
 	text := "habits.json не применён, показываю прошлую версию:\n" + escape(parseErr.Error())
-	if _, err := a.TG.Send(ctx, text, nil); err != nil {
+	if _, err := a.say(ctx, kindAlert, text, nil); err != nil {
 		a.Log.Warn("habits_notify_failed", "error", err)
 		return
 	}
@@ -359,7 +362,7 @@ func (a *App) syncHabits(ctx context.Context, local time.Time) error {
 		}
 	}
 
-	id, err := a.TG.Send(ctx, card, nil)
+	id, err := a.say(ctx, kindCard, card, nil)
 	if err != nil {
 		return fmt.Errorf("отправка карточки: %w", err)
 	}
@@ -393,6 +396,9 @@ func (a *App) morning(ctx context.Context, local time.Time) error {
 	data := render.MorningData{Date: date, StepsYesterday: yesterday.Steps, Step: step}
 	data.Extra = a.workoutLines(ctx, date, a.currentHabits(ctx, date))
 	if metrics.Monday(date) == date {
+		if line := a.mondayFocus(ctx, date, a.currentHabits(ctx, date)); line != "" {
+			data.Extra = append(data.Extra, line)
+		}
 		if block := a.learningBlock(ctx, date); block != "" {
 			data.Extra = append(data.Extra, block)
 		}
@@ -403,7 +409,7 @@ func (a *App) morning(ctx context.Context, local time.Time) error {
 	if day.WakeAt != nil && day.WakeAt.In(local.Location()).Format(time.DateOnly) == date {
 		data.WakeAt, data.WakeDeltaMin, data.SleepMinutes = day.WakeAt, day.WakeDeltaMin, day.SleepMinutes
 	}
-	if _, err := a.TG.Send(ctx, render.Morning(data, a.rules()), nil); err != nil {
+	if _, err := a.say(ctx, kindMorning, render.Morning(data, a.rules()), nil); err != nil {
 		return fmt.Errorf("утро: %w", err)
 	}
 	a.Log.Info("morning_sent", "date", date)
@@ -447,7 +453,7 @@ func (a *App) evening(ctx context.Context, local time.Time) error {
 		return nil
 	}
 	text, rows := a.eveningView(ctx, date, a.currentHabits(ctx, date), nil)
-	id, err := a.TG.SendRows(ctx, text, rows)
+	id, err := a.sayRows(ctx, kindEvening, text, rows)
 	if err != nil {
 		return fmt.Errorf("вечер: %w", err)
 	}
@@ -487,7 +493,7 @@ func (a *App) weekly(ctx context.Context, local time.Time) error {
 		return err
 	}
 	data.Summary = summary
-	if _, err := a.TG.Send(ctx, render.Weekly(data, a.rules()), nil); err != nil {
+	if _, err := a.say(ctx, kindReport, render.Weekly(data, a.rules()), nil); err != nil {
 		return fmt.Errorf("неделя: %w", err)
 	}
 	a.Log.Info("weekly_sent", "week", key)
@@ -498,6 +504,7 @@ func (a *App) weekly(ctx context.Context, local time.Time) error {
 	a.shareWeekly(ctx, data)
 	a.sendReview(ctx, key, f)
 	a.queueOffer(ctx, local, f)
+	a.monthSummary(ctx, local, f)
 	a.monthly(ctx, local, f)
 	return nil
 }
@@ -626,6 +633,7 @@ func parseCallback(data string) (date, status string, ok bool) {
 
 // OnStart — первый контакт: теперь бот может писать, пауза отправки не нужна.
 func (a *App) OnStart(ctx context.Context) {
+	a.trackIncoming(ctx, kindCommand)
 	a.mu.Lock()
 	a.backoff.Reset()
 	a.mu.Unlock()
@@ -634,7 +642,8 @@ func (a *App) OnStart(ctx context.Context) {
 
 // OnNonText отвечает на голосовые и всё, что не текст.
 func (a *App) OnNonText(ctx context.Context) {
-	if _, err := a.TG.Send(ctx, render.NonTextReply, nil); err != nil {
+	a.trackIncoming(ctx, kindUser)
+	if _, err := a.say(ctx, kindNotice, render.NonTextReply, nil); err != nil {
 		a.Log.Warn("reply_failed", "error", err)
 	}
 }
@@ -644,8 +653,11 @@ func (a *App) OnText(ctx context.Context, text string) {
 	// Номера карт и счетов не сохраняются нигде: ни в истории, ни в промпте.
 	text = money.Scrub(text)
 	if a.onMoneyText(ctx, text) {
+		// Остатки уже в базе (в сверке на подтверждение): само сообщение с цифрами не нужно.
+		a.trackIncoming(ctx, kindSecret)
 		return
 	}
+	a.trackIncoming(ctx, kindUser)
 	now := a.Now()
 	if err := a.Store.AddMessage(ctx, "user", text, now); err != nil {
 		a.Log.Warn("message_save_failed", "error", err)
@@ -653,7 +665,7 @@ func (a *App) OnText(ctx context.Context, text string) {
 	stop := a.keepTyping(ctx)
 	reply := a.freeReply(ctx, now)
 	stop()
-	if _, err := a.TG.Send(ctx, escape(reply), nil); err != nil {
+	if _, err := a.say(ctx, kindChat, escape(reply), nil); err != nil {
 		a.Log.Warn("reply_failed", "error", err)
 		return
 	}

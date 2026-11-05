@@ -116,6 +116,7 @@ func (b *Bot) onMessage(ctx context.Context, m *models.Message) {
 	if m.PinnedMessage != nil {
 		return // служебное сообщение о закреплении
 	}
+	ctx = core.WithIncoming(ctx, m.ID)
 	if m.WebAppData != nil {
 		b.handler.OnWebAppData(ctx, m.WebAppData.Data)
 		return
@@ -258,6 +259,20 @@ func (b *Bot) EditRows(ctx context.Context, msgID int, text string, rows [][]cor
 	case strings.Contains(msg, "message is not modified"):
 		return nil
 	case strings.Contains(msg, "message to edit not found"), strings.Contains(msg, "MESSAGE_ID_INVALID"):
+		return core.ErrMessageGone
+	}
+	return b.scrub(err)
+}
+
+// Delete убирает сообщение из чата. Telegram разрешает это только в первые 48 часов.
+func (b *Bot) Delete(ctx context.Context, msgID int) error {
+	_, err := b.api.DeleteMessage(ctx, &tg.DeleteMessageParams{ChatID: b.owner, MessageID: msgID})
+	if err == nil {
+		return nil
+	}
+	switch msg := err.Error(); {
+	case strings.Contains(msg, "message to delete not found"), strings.Contains(msg, "message can't be deleted"),
+		strings.Contains(msg, "MESSAGE_ID_INVALID"):
 		return core.ErrMessageGone
 	}
 	return b.scrub(err)

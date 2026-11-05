@@ -230,6 +230,8 @@ type WeeklyData struct {
 
 	Training map[string]int // дата → минуты тренировок
 	Extra    []string       // строки под цифрами: деньги, люди
+	Focus    []FocusItem    // где поднажать; при FocusOn = false блока нет (мало данных)
+	FocusOn  bool
 }
 
 // Weekly — недельная сводка: таблица, регулярность, якоря, три строки.
@@ -253,6 +255,9 @@ func Weekly(d WeeklyData, r Rules) string {
 	}
 	for _, e := range d.Extra {
 		b.WriteString("\n" + e)
+	}
+	if d.FocusOn {
+		b.WriteString("\n\n" + Focus(d.Focus))
 	}
 	b.WriteString("\n\nЯкоря на неделю:\n")
 	for _, h := range d.Habits {

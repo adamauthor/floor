@@ -7,6 +7,7 @@ import (
 	"testing"
 	"time"
 
+	"floor/internal/config"
 	"floor/internal/habits"
 	"floor/internal/money"
 	"floor/internal/render"
@@ -234,8 +235,10 @@ func TestWorkouts(t *testing.T) {
 	h.tick("2026-10-31 08:00", plus5)
 	writeHabits(t, h, workoutHabit)
 	h.apply(t, []byte(`{"schema":1,"generated_at":"2026-10-31T19:00:00+05:00","tz_offset":"+05:00","steps":[],"sleep":[],
-		"workouts":[{"start":"2026-10-31T18:00:00+05:00","end":"2026-10-31T18:52:00+05:00","type":"бег"},
-		{"start":"2026-10-30T18:00:00+05:00","end":"2026-10-30T18:10:00+05:00","type":"ходьба"}]}`))
+		"workouts":[{"start":"2026-10-31T18:00:00+05:00","end":"2026-10-31T18:52:00+05:00","type":"Силовая тренировка"},
+		{"start":"2026-10-31T08:00:00+05:00","end":"2026-10-31T09:00:00+05:00","type":"WALKING"},
+		{"start":"2026-10-30T18:00:00+05:00","end":"2026-10-30T18:10:00+05:00","type":"Бокс"},
+		{"start":"2026-10-29T18:00:00+05:00","end":"2026-10-29T19:00:00+05:00","type":"ходьба"}]}`))
 
 	h.tick("2026-10-31 21:00", plus5)
 	ev := h.tg.matching("🌙")
@@ -249,7 +252,7 @@ func TestWorkouts(t *testing.T) {
 		t.Errorf("пол дня: %s", d.FloorStatus)
 	}
 
-	// Карточка: одна тренировка на неделе (короткая ходьба не считается).
+	// Карточка: одна тренировка на неделе (короткий бокс и прогулки не считаются).
 	h.tick("2026-10-31 21:10", plus5)
 	h.tg.mu.Lock()
 	card := ""
@@ -284,6 +287,22 @@ func TestWorkouts(t *testing.T) {
 	h.tick("2026-11-02 10:00", plus5)
 	if m := h.tg.matching("☀️"); !strings.Contains(m[len(m)-1].text, "🏋️ Новая неделя: 0 из 3") {
 		t.Errorf("утро: %s", m[len(m)-1].text)
+	}
+}
+
+func TestWorkoutCounts(t *testing.T) {
+	rules := config.SplitList(config.DefaultWorkoutTypes)
+	for typ, want := range map[string]bool{
+		"STRENGTH_TRAINING": true, "WEIGHTLIFTING": true, "HIIT": true, "WORKOUT": true,
+		"Traditional Strength Training": true, "HKWorkoutActivityTypeBoxing": true, "Kickboxing": true,
+		"Martial Arts": true, "Силовая тренировка": true, "Бокс": true, "Тренировка": true,
+		"WALKING": false, "TREADMILL": false, "RUNNING": false, "HIKING": false, "AEROBIC_WORKOUT": false,
+		"BIKING": false, "YOGA": false, "OTHER": false, "Ходьба": false, "": false,
+		"HKWorkoutActivityTypeWalking": false,
+	} {
+		if got := WorkoutCounts(typ, rules); got != want {
+			t.Errorf("%q: %v, ожидалось %v", typ, got, want)
+		}
 	}
 }
 

@@ -56,7 +56,7 @@ func (a *App) queueOffer(ctx context.Context, local time.Time, f habits.File) {
 		{Text: "Запускаем", Data: callbackQueue + h.ID + ":go"},
 		{Text: "Ещё неделю", Data: callbackQueue + h.ID + ":wait"},
 	}}
-	if _, err := a.TG.SendRows(ctx, render.QueueOffer(h, held, queueWindowDays), rows); err != nil {
+	if _, err := a.sayRows(ctx, kindPrompt, render.QueueOffer(h, held, queueWindowDays), rows); err != nil {
 		a.Log.Warn("queue_failed", "error", err)
 		return
 	}

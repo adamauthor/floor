@@ -150,6 +150,9 @@ func (s *Store) UpsertWorkout(ctx context.Context, w Workout) error {
 	return nil
 }
 
+// WorkoutManual — источник ручной отметки «Была без часов».
+const WorkoutManual = "manual"
+
 // Workouts — тренировки за [from, to] не короче minMinutes (ручные засчитываются всегда), по датам.
 func (s *Store) Workouts(ctx context.Context, from, to string, minMinutes int) (map[string][]Workout, error) {
 	rows, err := s.db.QueryContext(ctx, `

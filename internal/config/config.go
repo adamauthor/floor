@@ -28,14 +28,15 @@ type Config struct {
 
 	HabitsFile string
 
-	MoneyFile         string // план денег (SPEC_v2, 2.2)
-	MoneyRemindDays   int    // через сколько дней без сверки напомнить
-	LearningFile      string // программа финграмотности; нет файла — встроенная
-	LearningStart     string // понедельник первой недели программы
-	WorkoutMinMinutes int    // минимальная длительность тренировки
-	WebAppURL         string // страница настроек (Telegram Mini App)
-	WebAppAddr        string // где бот принимает сохранение страницы; пусто — не принимает
-	NgrokAPI          string // локальный API ngrok, у которого бот узнаёт публичный адрес
+	MoneyFile         string   // план денег (SPEC_v2, 2.2)
+	MoneyRemindDays   int      // через сколько дней без сверки напомнить
+	LearningFile      string   // программа финграмотности; нет файла — встроенная
+	LearningStart     string   // понедельник первой недели программы
+	WorkoutMinMinutes int      // минимальная длительность тренировки
+	WorkoutTypes      []string // какие типы с часов считаются тренировкой (части названия, «=X» — точно)
+	WebAppURL         string   // страница настроек (Telegram Mini App)
+	WebAppAddr        string   // где бот принимает сохранение страницы; пусто — не принимает
+	NgrokAPI          string   // локальный API ngrok, у которого бот узнаёт публичный адрес
 
 	HealthSource string // "file" | "http" | "google"
 	HealthFile   string
@@ -112,6 +113,7 @@ func LoadLocal() (Config, error) {
 		LearningFile:      expandHome(r.str("LEARNING_FILE", "~/.floor/learning.json")),
 		LearningStart:     r.str("LEARNING_START", "2026-11-09"),
 		WorkoutMinMinutes: r.int("WORKOUT_MIN_MINUTES", 20),
+		WorkoutTypes:      r.list("WORKOUT_TYPES", DefaultWorkoutTypes),
 		WebAppURL:         r.str("WEBAPP_URL", "https://adamauthor.github.io/floor/app/"),
 		WebAppAddr:        r.str("WEBAPP_ADDR", "127.0.0.1:8791"),
 		NgrokAPI:          r.str("NGROK_API", "http://127.0.0.1:4040"),
@@ -159,6 +161,25 @@ func (r reader) str(key, def string) string {
 		return strings.TrimSpace(v)
 	}
 	return def
+}
+
+// DefaultWorkoutTypes — силовые, единоборства и интервальные. Прогулки, бег, дорожка,
+// велосипед и автоопределённая «аэробика» не считаются. WORKOUT — тренировка, которую
+// включили на часах вручную. Русские — для выгрузки из «Здоровья» на русском.
+const DefaultWorkoutTypes = "STRENGTH,WEIGHT,BOX,MARTIAL,KARATE,JUDO,JUJITSU,TAEKWONDO,WRESTL,MMA,HIIT,HIGHINTENSITY,CROSSFIT,CROSSTRAINING,CIRCUIT,CALISTHENIC,BOOTCAMP,KETTLEBELL,POWERLIFT,=WORKOUT," +
+	"СИЛОВ,БОКС,БОРЬБ,ЕДИНОБОР,КАРАТЭ,ДЗЮДО,ТХЭКВОНДО,КРОССФИТ,ИНТЕРВАЛ,КРУГОВ,=ТРЕНИРОВКА"
+
+func (r reader) list(key, def string) []string { return SplitList(r.str(key, def)) }
+
+// SplitList — список через запятую без пустых элементов.
+func SplitList(s string) []string {
+	var out []string
+	for _, part := range strings.Split(s, ",") {
+		if part = strings.TrimSpace(part); part != "" {
+			out = append(out, part)
+		}
+	}
+	return out
 }
 
 func (r reader) int(key string, def int) int {
