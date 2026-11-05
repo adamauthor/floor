@@ -79,15 +79,19 @@ func TestSettingsSavedFromWebApp(t *testing.T) {
 		st.Settings.StepsFloor = 5000
 		st.Habits = append(st.Habits, habits.Habit{ID: "read", Emoji: "📖", Title: "Чтение", Anchor: "лёг", Action: "страница книги", Floor: "открыть книгу"})
 	})
+	before := len(h.tg.matching("Сохранено"))
 	res := h.app.SaveSettings(ctx, data)
 	reply := res.Text
-	if !res.OK || h.lastText(t) != reply || res.Rev == "" {
+	if !res.OK || res.Rev == "" {
 		t.Fatalf("ответ %+v", res)
 	}
 	// Новая версия годится для следующей правки без перезапуска страницы.
 	again2 := h.submit(t, func(st *webapp.State) { st.Rev = res.Rev; st.Settings.StepsGoal = 12000 })
 	if !h.app.SaveSettings(ctx, again2).OK {
 		t.Error("вторая правка с новой версией не прошла")
+	}
+	if len(h.tg.matching("Сохранено")) != before {
+		t.Error("итог сохранения из Mini App ушёл в чат, хватает уведомления на странице")
 	}
 	for _, want := range []string{"✅ Сохранено", "подъём 07:00 → 09:30", "пол 5000", "новая привычка «Чтение»"} {
 		if !strings.Contains(reply, want) {
@@ -232,5 +236,15 @@ func TestLegacyKeyboardReplaced(t *testing.T) {
 	defer h.tg.mu.Unlock()
 	if len(h.tg.removes) != 1 || !strings.Contains(h.tg.removes[0], "переехали") || len(h.tg.menus) != 1 {
 		t.Errorf("removes=%v menus=%d", h.tg.removes, len(h.tg.menus))
+	}
+}
+
+// Со старой кнопки под полем ввода окно закрывается, поэтому итог приходит в чат.
+func TestWebAppDataRepliesInChat(t *testing.T) {
+	h := newHarness(t)
+	h.tick("2026-11-04 08:00", plus5)
+	h.app.OnWebAppData(ctx, h.submit(t, func(st *webapp.State) { st.Settings.StepsGoal = 11000 }))
+	if len(h.tg.matching("✅ Сохранено")) != 1 {
+		t.Error("нет итога в чате после sendData")
 	}
 }

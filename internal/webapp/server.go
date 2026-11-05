@@ -85,6 +85,8 @@ type SaveResult struct {
 	OK   bool   `json:"ok"`
 	Text string `json:"text"`
 	Rev  string `json:"rev,omitempty"`
+	// Invite — ссылка-приглашение, если её только что создали; она уже отправлена в чат.
+	Invite string `json:"-"`
 }
 
 func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {

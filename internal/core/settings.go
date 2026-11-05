@@ -143,18 +143,31 @@ func (a *App) OnSettings(ctx context.Context) {
 }
 
 // OnWebAppData — настройки со старой кнопки под полем ввода (sendData).
-func (a *App) OnWebAppData(ctx context.Context, data string) { a.SaveSettings(ctx, data) }
-
-// SaveSettings сохраняет настройки со страницы, пишет итог в чат и возвращает его
-// вместе с новой версией: страница остаётся открытой и может править дальше.
-func (a *App) SaveSettings(ctx context.Context, data string) webapp.SaveResult {
-	a.tickMu.Lock()
-	text, saved := a.saveSettings(ctx, data)
-	a.tickMu.Unlock()
-	if _, err := a.TG.Send(ctx, text, nil); err != nil {
+// Окно при этом закрывается, поэтому итог уходит в чат.
+func (a *App) OnWebAppData(ctx context.Context, data string) {
+	res := a.SaveSettings(ctx, data)
+	if res.Invite != "" {
+		return // ссылка уже в чате
+	}
+	if _, err := a.TG.Send(ctx, res.Text, nil); err != nil {
 		a.Log.Warn("settings_send_failed", "error", err)
 	}
+}
+
+// SaveSettings сохраняет настройки со страницы и возвращает итог вместе с новой версией:
+// страница остаётся открытой, показывает «Сохранено» и может править дальше. В чат уходит
+// только ссылка-приглашение — её удобнее переслать оттуда.
+func (a *App) SaveSettings(ctx context.Context, data string) webapp.SaveResult {
+	a.tickMu.Lock()
+	text, saved, invite := a.saveSettings(ctx, data)
+	a.tickMu.Unlock()
 	res := webapp.SaveResult{OK: saved, Text: text}
+	if invite != "" {
+		res.Invite = invite
+		if _, err := a.TG.Send(ctx, "Ссылка для того, кто будет получать итог недели: "+invite, nil); err != nil {
+			a.Log.Warn("settings_send_failed", "error", err)
+		}
+	}
 	if saved {
 		a.Tick(ctx, a.Now()) // карточка, расписание и кнопка меню сразу видят новое
 		today := a.Now().In(a.location(ctx)).Format(time.DateOnly)
@@ -163,7 +176,7 @@ func (a *App) SaveSettings(ctx context.Context, data string) webapp.SaveResult {
 	return res
 }
 
-func (a *App) saveSettings(ctx context.Context, data string) (string, bool) {
+func (a *App) saveSettings(ctx context.Context, data string) (text string, saved bool, invite string) {
 	today := a.Now().In(a.location(ctx)).Format(time.DateOnly)
 	cur := a.conf()
 	f := a.currentHabits(ctx, today)
@@ -171,11 +184,11 @@ func (a *App) saveSettings(ctx context.Context, data string) (string, bool) {
 	st, err := webapp.Parse(data)
 	if err != nil {
 		a.Log.Warn("settings_rejected", "error", err)
-		return "Не сохранил: " + escape(err.Error()), false
+		return "Не сохранил: " + escape(err.Error()), false, ""
 	}
 	if st.Rev != webapp.Rev(cur.Settings(), f) {
 		a.Log.Info("settings_stale")
-		return "Пока окно было открыто, настройки поменялись. Открой ещё раз — там уже свежие.", false
+		return "Пока окно было открыто, настройки поменялись. Открой ещё раз — там уже свежие.", false, ""
 	}
 	next := cur
 	nf := habits.File{Habits: normalize(st.Habits, today)}
@@ -185,17 +198,17 @@ func (a *App) saveSettings(ctx context.Context, data string) (string, bool) {
 	}
 	if err != nil {
 		a.Log.Warn("settings_rejected", "error", err)
-		return "Не сохранил:\n" + escape(err.Error()), false
+		return "Не сохранил:\n" + escape(err.Error()), false, ""
 	}
 
 	if err := habits.Save(cur.HabitsFile, nf); err != nil {
 		a.Log.Error("settings_save_failed", "error", err)
-		return "Не сохранил: " + escape(err.Error()), false
+		return "Не сохранил: " + escape(err.Error()), false, ""
 	}
 	raw, _ := json.Marshal(next.Settings())
 	if err := a.Store.SetKV(ctx, kvSettings, string(raw)); err != nil {
 		a.Log.Error("settings_save_failed", "error", err)
-		return "Привычки сохранил, а время и шаги — нет. Попробуй ещё раз.", false
+		return "Привычки сохранил, а время и шаги — нет. Попробуй ещё раз.", false, ""
 	}
 	a.setConf(next)
 	if err := a.syncWakeDeltas(ctx); err != nil {
@@ -204,40 +217,41 @@ func (a *App) saveSettings(ctx context.Context, data string) (string, bool) {
 
 	changes := webapp.Changes(cur.Settings(), next.Settings(), f.Habits, nf.Habits)
 	if st.Share != nil {
-		line, err := a.applyShare(ctx, *st.Share)
+		line, link, err := a.applyShare(ctx, *st.Share)
 		if err != nil {
 			a.Log.Warn("share_failed", "error", err)
 		}
 		if line != "" {
 			changes = append(changes, line)
 		}
+		invite = link
 	}
 	a.Log.Info("settings_saved", "changes", len(changes))
-	text := "✅ Сохранено"
+	text = "✅ Сохранено"
 	if len(changes) > 0 {
 		text += ": " + escape(strings.Join(changes, ", "))
 	}
-	return text, true
+	return text, true, invite
 }
 
 // applyShare включает или выключает итог недели второму человеку и говорит, что сделано.
-func (a *App) applyShare(ctx context.Context, on bool) (string, error) {
+func (a *App) applyShare(ctx context.Context, on bool) (line, link string, err error) {
 	chat, _ := a.watcher(ctx)
 	switch {
 	case on && chat == 0:
 		link, err := a.invite(ctx)
 		if err != nil {
-			return "", err
+			return "", "", err
 		}
-		return "ссылка для того, кто будет получать итог недели: " + link, nil
+		return "ссылка на итог недели отправлена в чат", link, nil
 	case !on:
 		token, err := a.Store.GetKV(ctx, kvWatchToken)
 		if err != nil || (chat == 0 && token == "") {
-			return "", err
+			return "", "", err
 		}
-		return "итог недели больше никому не уходит", a.unwatch(ctx)
+		return "итог недели больше никому не уходит", "", a.unwatch(ctx)
 	}
-	return "", nil
+	return "", "", nil
 }
 
 // normalize чистит пробелы и ставит дату начала новым привычкам.

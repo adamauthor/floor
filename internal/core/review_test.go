@@ -205,10 +205,11 @@ func TestWatchInviteFlow(t *testing.T) {
 	h.tick("2026-10-31 08:00", plus5)
 	on := true
 	res := h.app.SaveSettings(ctx, h.submit(t, func(st *webappState) { st.Share = &on }))
-	if !res.OK || !strings.Contains(res.Text, "https://t.me/floor_test_bot?start=w") {
-		t.Fatalf("приглашение: %+v", res)
+	msgs := h.tg.matching("https://t.me/floor_test_bot?start=w")
+	if !res.OK || len(msgs) != 1 || !strings.HasPrefix(res.Invite, "https://t.me/floor_test_bot?start=w") {
+		t.Fatalf("приглашение: %+v / %v", res, msgs)
 	}
-	link := res.Text[strings.Index(res.Text, "start=")+len("start="):]
+	link := res.Invite[strings.Index(res.Invite, "start=")+len("start="):]
 
 	h.app.OnWatch(ctx, 555, "Мама", "wчужой")
 	if chat, _ := h.app.watcher(ctx); chat != 0 {
