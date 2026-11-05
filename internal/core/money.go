@@ -298,6 +298,20 @@ func (a *App) lastReport(ctx context.Context, today string) (*money.Report, mone
 	return &r, f
 }
 
+// planReport — как lastReport, но без сверок считает от точки отсчёта: Claude должен
+// видеть план с первого дня. baseline = true — это ещё не сверка.
+func (a *App) planReport(ctx context.Context, today string) (*money.Report, money.File, bool) {
+	if r, f := a.lastReport(ctx, today); r != nil {
+		return r, f, false
+	}
+	f, ok := a.currentMoney(ctx, today)
+	if !ok {
+		return nil, f, false
+	}
+	r := f.Calc(f.BaselineSnapshot(), nil)
+	return &r, f, true
+}
+
 // moneyGoalToday — строка утра: сегодня наступила цель-дата.
 func (a *App) moneyGoalToday(ctx context.Context, today string) string {
 	f, ok := a.currentMoney(ctx, today)

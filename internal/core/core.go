@@ -530,9 +530,13 @@ func (a *App) promptContext(ctx context.Context, today string, n int) (table, hs
 	}
 	table = render.ContextTable(plainDays(days), f.Active(), levels(marks), a.trainingDays(ctx, metrics.AddDays(today, 1-n), today))
 	// Блоки 2.0: деньги и тема недели, если есть. Цифры для Claude — только отсюда.
-	if r, mf := a.lastReport(ctx, today); r != nil {
+	if r, mf, baseline := a.planReport(ctx, today); r != nil {
+		if baseline {
+			table += "\nСверок ещё не было: цифры ниже — точка отсчёта из плана."
+		}
 		table += "\n" + render.MoneyContext(*r, mf)
 	}
+	table += a.notesContext(ctx)
 	if w, ok := a.learningWeek(ctx, today); ok {
 		table += fmt.Sprintf("\nТема недели (финграмотность, неделя %d из %d): %s. Действие: %s\n", w.Index+1, w.Total, w.Topic.Title, w.Topic.Action)
 	}
@@ -566,6 +570,8 @@ func (a *App) OnCallback(ctx context.Context, data string, msgID int) string {
 		return a.onReview(ctx, strings.TrimPrefix(data, callbackWeek), msgID)
 	case strings.HasPrefix(data, callbackQueue):
 		return a.onQueue(ctx, strings.TrimPrefix(data, callbackQueue), msgID)
+	case strings.HasPrefix(data, callbackDo):
+		return a.onDo(ctx, strings.TrimPrefix(data, callbackDo), msgID)
 	case strings.HasPrefix(data, callbackMoney):
 		return a.onMoney(ctx, strings.TrimPrefix(data, callbackMoney), msgID)
 	case strings.HasPrefix(data, callbackMonth):
@@ -663,40 +669,40 @@ func (a *App) OnText(ctx context.Context, text string) {
 		a.Log.Warn("message_save_failed", "error", err)
 	}
 	stop := a.keepTyping(ctx)
-	reply := a.freeReply(ctx, now)
+	raw, ok := a.freeReply(ctx, now)
 	stop()
-	if _, err := a.say(ctx, kindChat, escape(reply), nil); err != nil {
+	if !ok {
+		if _, err := a.say(ctx, kindChat, escape(render.FreeTextFallback), nil); err != nil {
+			a.Log.Warn("reply_failed", "error", err)
+		}
+		return
+	}
+	history, err := a.replyWithActions(ctx, raw)
+	if err != nil {
 		a.Log.Warn("reply_failed", "error", err)
 		return
 	}
-	if reply != render.FreeTextFallback {
-		if err := a.Store.AddMessage(ctx, "assistant", reply, a.Now()); err != nil {
-			a.Log.Warn("message_save_failed", "error", err)
-		}
-	}
+	a.addHistory(ctx, history)
 }
 
-func (a *App) freeReply(ctx context.Context, now time.Time) string {
+// freeReply — сырой ответ Claude, вместе с возможным блоком действий. false — Claude недоступен.
+func (a *App) freeReply(ctx context.Context, now time.Time) (string, bool) {
 	today := now.In(a.location(ctx)).Format(time.DateOnly)
 	table, hs, err := a.promptContext(ctx, today, 14)
 	if err != nil {
 		a.Log.Warn("context_failed", "error", err)
-		return render.FreeTextFallback
+		return "", false
 	}
 	history, err := a.Store.RecentMessages(ctx, 20)
 	if err != nil {
 		a.Log.Warn("context_failed", "error", err)
-		return render.FreeTextFallback
+		return "", false
 	}
 	turns := make([]llm.Turn, 0, len(history))
 	for _, m := range history {
 		turns = append(turns, llm.Turn{Role: m.Role, Text: m.Text})
 	}
-	raw, ok := a.ask(ctx, today, llm.FreePrompt(table, hs, turns), "free_text")
-	if !ok {
-		return render.FreeTextFallback
-	}
-	return llm.Truncate(raw, llm.MaxFreeRunes)
+	return a.ask(ctx, today, llm.FreePrompt(table, hs, a.controlContext(ctx), turns), "free_text")
 }
 
 // keepTyping показывает «печатает…», пока Claude думает: индикатор живёт 5 секунд.

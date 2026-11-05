@@ -175,7 +175,7 @@ func TestFallbackStep(t *testing.T) {
 func TestPrompts(t *testing.T) {
 	m := MorningPrompt("ТАБЛИЦА", "ЯКОРЯ")
 	w := WeeklyPrompt("ТАБЛИЦА", "ЯКОРЯ")
-	f := FreePrompt("ТАБЛИЦА", "ЯКОРЯ", []Turn{{"user", "вопрос"}, {"assistant", "ответ"}})
+	f := FreePrompt("ТАБЛИЦА", "ЯКОРЯ", "", []Turn{{"user", "вопрос"}, {"assistant", "ответ"}})
 	for _, p := range []string{m, w, f} {
 		if !strings.Contains(p, "ТАБЛИЦА") || !strings.Contains(p, "ЯКОРЯ") {
 			t.Errorf("нет контекста: %s", p)

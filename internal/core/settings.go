@@ -203,18 +203,9 @@ func (a *App) saveSettings(ctx context.Context, data string) (text string, saved
 		return "Не сохранил:\n" + escape(err.Error()), false, ""
 	}
 
-	if err := habits.Save(cur.HabitsFile, nf); err != nil {
+	if msg, err := a.commitSettings(ctx, next, nf); err != nil {
 		a.Log.Error("settings_save_failed", "error", err)
-		return "Не сохранил: " + escape(err.Error()), false, ""
-	}
-	raw, _ := json.Marshal(next.Settings())
-	if err := a.Store.SetKV(ctx, kvSettings, string(raw)); err != nil {
-		a.Log.Error("settings_save_failed", "error", err)
-		return "Привычки сохранил, а время и шаги — нет. Попробуй ещё раз.", false, ""
-	}
-	a.setConf(next)
-	if err := a.syncWakeDeltas(ctx); err != nil {
-		a.Log.Warn("wake_deltas_failed", "error", err)
+		return msg, false, ""
 	}
 
 	changes := webapp.Changes(cur.Settings(), next.Settings(), f.Habits, nf.Habits)
@@ -234,6 +225,23 @@ func (a *App) saveSettings(ctx context.Context, data string) (text string, saved
 		text += ": " + escape(strings.Join(changes, ", "))
 	}
 	return text, true, invite
+}
+
+// commitSettings записывает привычки и настройки и применяет их без перезапуска.
+// При ошибке возвращает текст для владельца.
+func (a *App) commitSettings(ctx context.Context, next config.Config, nf habits.File) (string, error) {
+	if err := habits.Save(next.HabitsFile, nf); err != nil {
+		return "Не сохранил: " + escape(err.Error()), err
+	}
+	raw, _ := json.Marshal(next.Settings())
+	if err := a.Store.SetKV(ctx, kvSettings, string(raw)); err != nil {
+		return "Привычки сохранил, а время и шаги — нет. Попробуй ещё раз.", err
+	}
+	a.setConf(next)
+	if err := a.syncWakeDeltas(ctx); err != nil {
+		a.Log.Warn("wake_deltas_failed", "error", err)
+	}
+	return "", nil
 }
 
 // applyShare включает или выключает итог недели второму человеку и говорит, что сделано.

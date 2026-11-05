@@ -46,7 +46,7 @@ func TestLiveClaude(t *testing.T) {
 		t.Errorf("неделя не в нужной форме: %q", raw)
 	}
 
-	raw, err = c.Ask(ctx, System, FreePrompt(table, habits, []Turn{{"user", "какие у меня сейчас привычки и якоря?"}}))
+	raw, err = c.Ask(ctx, System, FreePrompt(table, habits, "", []Turn{{"user", "какие у меня сейчас привычки и якоря?"}}))
 	if err != nil {
 		t.Fatal(err)
 	}

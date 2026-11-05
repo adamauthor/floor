@@ -444,6 +444,10 @@ func (s *Store) Cleanup(ctx context.Context, now time.Time) error {
 		now.Add(-PendingTTL).UTC().Format(time.RFC3339)); err != nil {
 		return fmt.Errorf("очистка сверок: %w", err)
 	}
+	if _, err := s.db.ExecContext(ctx, `DELETE FROM pending_actions WHERE created_at < ?`,
+		now.Add(-PendingTTL).UTC().Format(time.RFC3339)); err != nil {
+		return fmt.Errorf("очистка изменений: %w", err)
+	}
 	if _, err := s.db.ExecContext(ctx, `DELETE FROM chat_messages WHERE sent_at < ?`,
 		now.Add(-MessagesRetention).UTC().Format(time.RFC3339)); err != nil {
 		return fmt.Errorf("очистка журнала чата: %w", err)
