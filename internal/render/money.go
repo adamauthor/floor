@@ -232,6 +232,23 @@ func MoneyContext(r money.Report, f money.File) string {
 	for _, c := range r.Countdown {
 		fmt.Fprintf(&b, "%s через %d дн\n", c.Goal.Title, c.Days)
 	}
+	var purposes []string
+	for _, a := range f.Accounts {
+		if a.Purpose != "" {
+			purposes = append(purposes, a.Name()+" — "+a.Purpose)
+		}
+	}
+	if len(purposes) > 0 {
+		b.WriteString("счета: " + strings.Join(purposes, "; ") + "\n")
+	}
+	for _, g := range f.Goals {
+		if g.Note != "" {
+			fmt.Fprintf(&b, "цель «%s»: %s\n", g.Title, g.Note)
+		}
+	}
+	for _, n := range f.Notes {
+		b.WriteString("договорённость: " + n + "\n")
+	}
 	return b.String()
 }
 

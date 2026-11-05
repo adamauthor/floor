@@ -42,6 +42,7 @@ type File struct {
 	Transfers   []Transfer `json:"transfers"`
 	Budget      Budget     `json:"budget"`
 	Goals       []Goal     `json:"goals"`
+	Notes       []string   `json:"notes,omitempty"` // договорённости словами: что пока не делаем, что после целей
 }
 
 // Account — счёт.
@@ -51,6 +52,7 @@ type Account struct {
 	Short   string   `json:"short,omitempty"` // как показывать в одну строку; пусто — Title
 	Role    string   `json:"role"`
 	Aliases []string `json:"aliases"`
+	Purpose string   `json:"purpose,omitempty"` // назначение словами: «зарплата и повседневные расходы»
 }
 
 // Name — короткое имя счёта.
@@ -96,6 +98,7 @@ type Goal struct {
 	By      string `json:"by,omitempty"`
 	On      string `json:"on,omitempty"`
 	Title   string `json:"title"`
+	Note    string `json:"note,omitempty"` // уточнение: «без премии», «после закрытия долгов»
 }
 
 // Defaults — пример плана для первого запуска. Цифры вымышленные: свой план
